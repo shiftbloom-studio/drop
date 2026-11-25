@@ -30,6 +30,6 @@
     "url": "https://github.com/shiftbloom-studio/drop/issues"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=26"
   }
 }

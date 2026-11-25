@@ -141,10 +141,23 @@ echo "$TOKEN"
 
 A `.sxcu` file downloaded from `/api/sharex` carries the token it was requested with, so it stops working together with that token.
 
+### Token requests
+
+drop can take requests for tokens from visitors. It's off until you set both Turnstile keys:
+
+1. Create a [Turnstile](https://developers.cloudflare.com/turnstile/) widget for your drop hostname.
+2. Set its site key as the `TURNSTILE_SITE_KEY` var and its secret with `wrangler secret put TURNSTILE_SECRET`.
+3. Apply migration `0005_token_requests.sql`.
+
+Then the start page offers "Ask for a token", which leads to a form at `/request` (name and what they want to upload, checked with Turnstile, rate limited per IP by `REQ_RL`, at most 50 open requests at a time). The visitor gets a private claim link. You approve or reject the request in the `token_requests` table; [field](https://github.com/shiftbloom-studio/field) does this from its drop screen. Approving sets `status = 'approved'`, `decided_at`, and optionally `label` and `token_expires_at`. When the visitor opens the claim link and presses "Show my token", drop generates the token, stores its hash in `api_tokens` and shows it once. It is never stored in plain text, never part of a URL and never sent by email.
+
+Approved tokens have to be collected within 14 days. Requests are deleted 30 days after they were made (or once the claim window has passed). For extra protection, add a Cloudflare WAF custom rule with the action *Managed Challenge* for `http.request.uri.path eq "/request"` on your hostname.
+
 ## Security model
 
 - Uploads are protected by the `API_TOKEN` secret and by named tokens. Treat `.sxcu` files like passwords. Rotate the master token with `wrangler secret put API_TOKEN`; revoke a named token instead of rotating the master token when only one device or person should lose access.
-- Failed token attempts and requests for ids that don't exist are rate limited per IP (`AUTH_RL`, `MISS_RL` in `wrangler.jsonc`).
+- Failed token attempts, requests for ids that don't exist and token requests are rate limited per IP (`AUTH_RL`, `MISS_RL`, `REQ_RL` in `wrangler.jsonc`).
+- Token requests are checked with Turnstile on the server. Claim links are 32 random characters, stored only as a hash, served with `no-store`, `noindex` and `Referrer-Policy: no-referrer`, and a token is issued only from a POST, so link scanners can't collect it.
 - drop looks at the first bytes of every upload instead of trusting the file name or the client's content type. Programs, scripts, installers, disk images and Office files with macros are refused, also when they are renamed.
 - Only passive types (common images, audio, video, PDF and plain text) are shown inline. Everything else, including HTML and SVG, is served as `application/octet-stream` with `Content-Disposition: attachment`. Raw files also get `Content-Security-Policy: sandbox`, so nothing uploaded runs script on your origin.
 - Location data (GPS) is removed from JPEG and PNG uploads before they are stored. The image itself isn't re-encoded.
@@ -161,7 +174,7 @@ Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 
 ## Design
 
-The UI follows the shiftbloom studio brand book: white paper and ink, Bloom Red `#FF2E52` as the only accent, and the Bloom mark drawn as SVG from its construction spec. Type is set in Clash Display, General Sans and JetBrains Mono. Motion uses the Bloom Ease `cubic-bezier(.22,1.1,.36,1)`. When you fork, you are welcome to restyle `src/html.ts`.
+The UI follows the shiftbloom studio brand book: white paper and ink, Bloom Red `#FF2E52` as the only accent, the Bloom mark drawn as SVG from its construction spec, the shiftbloom studio wordmark, mono labels in small caps and a few sprinkles in the margins. Type is set in Clash Display, General Sans and JetBrains Mono. Motion uses the Bloom Ease `cubic-bezier(.22,1.1,.36,1)`. When you fork, you are welcome to restyle `src/html.ts`.
 
 `src/ui.ts` ships as its own module (`ui.js`), so you can change the look without touching the API code.
 

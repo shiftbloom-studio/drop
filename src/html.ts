@@ -38,7 +38,7 @@ const CROSS = (size: number, color = "#1A1216") =>
 
 // ---------- shared styles ----------
 const css = `
-:root{--bloom:#FF2E52;--root:#C81040;--petal:#FF8FAB;--blush:#FFE9EF;--ink:#1A1216;--ink60:rgba(26,18,22,.6);--ink40:rgba(26,18,22,.42);--line:rgba(26,18,22,.12);--paper:#fff;--warm:#FAF6F4;
+:root{--bloom:#FF2E52;--root:#C81040;--petal:#FF8FAB;--blush:#FFE9EF;--ink:#1A1216;--ink60:rgba(26,18,22,.66);--ink40:rgba(26,18,22,.42);--line:#ece4e6;--paper:#fff;--warm:#FAF6F4;
 --display:"Clash Display",ui-sans-serif,system-ui,sans-serif;--sans:"General Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
 --ease:cubic-bezier(.22,1.1,.36,1);--settle:cubic-bezier(.4,0,.2,1)}
 *{box-sizing:border-box}[hidden]{display:none!important}html{-webkit-text-size-adjust:100%}
@@ -47,7 +47,7 @@ body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.65 var(--sans
 a{color:var(--root);text-decoration:none;background:linear-gradient(var(--root),var(--root)) 0 100%/0 1px no-repeat;transition:background-size .24s var(--ease)}
 a:hover{background-size:100% 1px}
 .wrap{max-width:1040px;margin:0 auto;padding:0 clamp(20px,5vw,48px)}
-.label{font:500 12px/1.4 var(--mono);letter-spacing:.04em;color:var(--ink60)}
+.label{font:500 11px/1.4 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink60)}
 .label.red{color:var(--root)}
 .mono{font-family:var(--mono)}
 .top{display:flex;align-items:center;justify-content:space-between;padding:22px 0;border-bottom:1px solid var(--line)}
@@ -62,13 +62,16 @@ h2{font-size:24px;line-height:1.1}
 .btn.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
 .btn.ghost:hover{background:var(--ink);color:#fff}
 .btn.sm{padding:9px 14px;font-size:13px}
-.btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.btn:focus-visible,a:focus-visible,button:focus-visible{outline:2px solid var(--root);outline-offset:2px}
+.sb{font:600 15px/1 var(--display);letter-spacing:-.02em;color:var(--ink);background:none;white-space:nowrap}.sb span{font-weight:400;color:var(--ink60);margin-left:.28em}.sb i{font-style:normal;color:var(--bloom)}
+.sprinkle{position:absolute;pointer-events:none}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.02)}}
 input,textarea,select{font:15px/1.5 var(--sans);color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 14px;width:100%;transition:border-color .24s var(--settle),box-shadow .24s var(--settle)}
 input:focus,textarea:focus,select:focus{outline:0;border-color:var(--bloom);box-shadow:0 0 0 3px var(--blush)}
 textarea{min-height:200px;font:13px/1.6 var(--mono);resize:vertical}
 .panel{background:var(--warm);border-radius:20px;padding:clamp(18px,3vw,32px)}
 .seedlist{list-style:none;padding:0;margin:0}.seedlist li{position:relative;padding-left:18px}.seedlist li:before{content:"";position:absolute;left:2px;top:.68em;width:7px;height:7px;border-radius:50%;background:var(--bloom)}
-.foot{display:flex;justify-content:space-between;gap:12px 24px;flex-wrap:wrap;padding:22px 0 30px;margin-top:72px;border-top:1px solid var(--line)}.foot .sb,.who .sb{font-family:var(--display);letter-spacing:-.02em}.sb .studio{font-weight:400;color:var(--ink60)}.foot .sb{color:var(--ink);background:none;font-weight:600}.foot .sb i{font-style:normal;color:var(--bloom)}.foot p{margin:0;font-size:14px;color:var(--ink60)}
+.foot{display:flex;justify-content:space-between;gap:12px 24px;flex-wrap:wrap;padding:22px 0 30px;margin-top:72px;border-top:1px solid var(--line)}.foot p{margin:0;font-size:14px;color:var(--ink60)}
 .unfold{animation:unfold .6s var(--ease) both}
 @keyframes unfold{from{opacity:0;transform:scale(.6)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
@@ -78,16 +81,19 @@ const head = (title: string, extra = "", index = false, lang = "en") => `<!docty
 <title>${esc(title)}</title>${index ? "" : `<meta name="robots" content="noindex">`}<meta name="theme-color" content="#ffffff">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/fonts.css">${extra}<style>${css}`;
 
-const topbar = (right = "") => `<header class="top"><a class="brand" href="/" aria-label="drop — shiftbloom studio">${bloom({ size: 30 })}<span class="word">drop<i>.</i></span></a>${right}</header>`;
+/** Wordmark per brand book: "shiftbloom" semibold, "studio" regular at 60% ink, red seed period. */
+const STUDIO = `<a class="sb" href="https://shiftbloom.studio" aria-label="shiftbloom studio">shiftbloom<span>studio</span><i>.</i></a>`;
+
+const topbar = (right = "") => `<header class="top"><a class="brand" href="/" aria-label="drop — shiftbloom studio">${bloom({ size: 30, id: "tb" })}<span class="word">drop<i>.</i></span></a>${right}</header>`;
 
 /** AGPL §13: users interacting over a network must be offered the source. Forks: point this at your repo. */
 export const SOURCE_URL = "https://github.com/shiftbloom-studio/drop";
 
 /** Set per request from the Worker's config: which optional links the pages show. */
-let UI: { legal: boolean; abuseEmail: string | null } = { legal: false, abuseEmail: null };
+let UI: { legal: boolean; abuseEmail: string | null; requests?: boolean } = { legal: false, abuseEmail: null, requests: false };
 export function configureUi(c: typeof UI) { UI = c; }
 
-const footer = (lang: "en" | "de" = "en") => `<footer class="foot"><p>${lang === "de" ? "drop ist Open Source unter AGPL-3.0." : "drop is open source under AGPL-3.0."} <a href="${SOURCE_URL}">${lang === "de" ? "Zum Code" : "Read the code"}</a>${UI.legal ? (lang === "de" ? ` · <a href="/datenschutz">Datenschutz</a> · <a href="/impressum">Impressum</a>` : ` · <a href="/privacy">Privacy</a> · <a href="/imprint">Imprint</a>`) : ""}</p><p><a class="sb" href="https://shiftbloom.studio">shiftbloom <span class="studio">studio</span><i>.</i></a> · hamburg</p></footer>`;
+const footer = (lang: "en" | "de" = "en") => `<footer class="foot"><p>${lang === "de" ? "drop ist Open Source unter AGPL-3.0." : "drop is open source under AGPL-3.0."} <a href="${SOURCE_URL}">${lang === "de" ? "Zum Code" : "Read the code"}</a>${UI.legal ? (lang === "de" ? ` · <a href="/datenschutz">Datenschutz</a> · <a href="/impressum">Impressum</a>` : ` · <a href="/privacy">Privacy</a> · <a href="/imprint">Imprint</a>`) : ""}</p><p>${STUDIO} · hamburg</p></footer>`;
 
 // ---------- landing ----------
 const SITE_TITLE = "drop. · shiftbloom studio";
@@ -125,15 +131,17 @@ export function landingPage(host: string, lim: Limits = { multiMb: 95, maxMb: 50
   return `${head(SITE_TITLE, `${early}${landingMeta(`https://${host}`)}`, true)}
 html.authed .anon,html:not(.authed) .member{display:none!important}
 html:not(.want) #tokf{display:none}
-.hero{display:grid;grid-template-columns:1.35fr 1fr;align-items:end;gap:32px;padding:clamp(32px,6vw,64px) 0 clamp(24px,4vw,40px)}
+.hero{display:grid;grid-template-columns:1.5fr 1fr;align-items:center;gap:32px;padding:clamp(32px,6vw,64px) 0 clamp(24px,4vw,40px)}
 .hero h1{font-size:clamp(34px,4.8vw,56px);line-height:1.04;max-width:14em}
 .hero p{font-size:17px;color:var(--ink60);max-width:32em;margin:18px 0 0}
-.demo{background:var(--warm);border-radius:18px;padding:22px 22px 18px}
+.demo{display:inline-block;background:var(--warm);border-radius:14px;padding:14px 20px;margin-top:26px}
+.art{position:relative;display:grid;place-items:center;min-height:280px}
+.art .bloom{width:min(220px,70%);height:auto;animation:unfold .6s var(--ease) both,breathe 6s var(--settle) .6s infinite}
 .demo .u{font:500 clamp(15px,1.75vw,22px)/1.3 var(--mono);white-space:nowrap;color:var(--ink)}
 .demo .u b{font-weight:600;color:var(--root)}
 .demo .cap{font-size:13px;color:var(--ink60);margin:8px 0 0}
 .who{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink60)}
-html.authed .who:before{content:"";width:7px;height:7px;border-radius:50%;background:#2E9E62}.who .sb{color:var(--ink);background:none;font-weight:600}.who .sb i{font-style:normal;color:var(--bloom)}
+html.authed .who:before{content:"";width:7px;height:7px;border-radius:50%;background:#2E9E62}
 .gate{display:grid;gap:16px;max-width:40em}
 .gate p{margin:0;font-size:17px}
 #tokf{display:grid;gap:8px;margin-top:6px}
@@ -145,7 +153,7 @@ html.authed .who:before{content:"";width:7px;height:7px;border-radius:50%;backgr
 .tabs{display:inline-flex;gap:4px;background:#fff;border-radius:999px;padding:4px;box-shadow:inset 0 0 0 1px var(--line)}
 .tabs button{appearance:none;border:0;background:transparent;border-radius:999px;padding:9px 18px;font:500 14px/1 var(--sans);color:var(--ink60);cursor:pointer;transition:background .24s var(--settle),color .24s var(--settle)}
 .tabs button[aria-selected=true]{background:var(--ink);color:#fff}
-.tabs button:focus-visible{outline:2px solid var(--bloom);outline-offset:2px}
+.tabs button:focus-visible{outline:2px solid var(--root);outline-offset:2px}
 .exp{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--ink60)}
 .exp select{width:auto;padding:8px 34px 8px 12px;border-radius:999px;font:500 14px/1 var(--sans)}
 #drop{border:1.5px dashed rgba(26,18,22,.28);border-radius:18px;background:#fff;padding:clamp(32px,5vw,52px) 20px;text-align:center;cursor:pointer;transition:border-color .24s var(--settle),background .24s var(--settle)}
@@ -179,20 +187,24 @@ td.undo{color:var(--ink60);padding:18px 8px}
 .x{appearance:none;border:0;background:none;color:var(--ink60);cursor:pointer;font:500 13px var(--sans);padding:6px}.x:hover{color:var(--root)}
 .more{display:flex;justify-content:center;margin-top:18px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-@media (max-width:760px){.hero{grid-template-columns:1fr;align-items:start}td.m,th.m{display:none}.mm{display:block}}
+@media (max-width:760px){.hero{grid-template-columns:1fr;align-items:start}.art{display:none}td.m,th.m{display:none}.mm{display:block}}
 </style></head><body>
 <div class="wrap">
-${topbar(`<div class="who"><span class="member">token saved</span><span class="member" aria-hidden="true">·</span><button class="lnk member" id="logout" type="button">Forget token</button><a class="sb anon" href="https://shiftbloom.studio">shiftbloom <span class="studio">studio</span><i>.</i></a></div>`)}
+${topbar(`<div class="who"><span class="member">token saved</span><span class="member" aria-hidden="true">·</span><button class="lnk member" id="logout" type="button">Forget token</button>${STUDIO.replace('class="sb"', 'class="sb anon"')}</div>`)}
 <section class="hero">
   <div><span class="label member" id="stats"></span>
   <h1 style="margin-top:14px">Every file gets five characters<em>.</em></h1>
-  <p>Drop a file here and the link is in your clipboard before you’ve switched windows. Text and long URLs work the same way. If something shouldn’t stick around, give it an expiry date.</p></div>
-  <div class="demo"><div class="u">${esc(host)}/<b>aB3dE</b></div></div>
+  <p>Drop a file here and the link is in your clipboard before you’ve switched windows. Text and long URLs work the same way. If something shouldn’t stick around, give it an expiry date.</p>
+  <div class="demo"><div class="u">${esc(host)}/<b>aB3dE</b></div></div></div>
+  <div class="art" aria-hidden="true">${bloom({ size: 220, id: "hb" })}<span class="sprinkle" style="top:6%;left:10%">${SPARK(18)}</span><span class="sprinkle" style="top:14%;right:6%">${CROSS(10)}</span><span class="sprinkle" style="bottom:10%;left:18%"><svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#FF2E52"/></svg></span><span class="sprinkle" style="bottom:4%;right:16%">${SPARK(12, "#FF8FAB")}</span></div>
 </section>
 
 <section class="panel gate anon" aria-labelledby="gate-h">
-  <h2 id="gate-h">This one’s private.</h2><p>Uploading here needs a token, and the token is ours. The code is open though, so you can run your own drop on your Cloudflare account.</p>
-  <div class="row"><a class="btn" href="${SOURCE_URL}#self-hosting">Set up your own</a><button class="lnk" id="have" type="button" aria-controls="tokf" aria-expanded="false">I have a token</button></div>
+  <h2 id="gate-h">This one’s private.</h2>${UI.requests
+    ? `<p>Uploading here needs a token. Ask for one and we’ll take a look, or run your own drop on your Cloudflare account. The code is open.</p>
+  <div class="row"><a class="btn" href="/request">Ask for a token</a><a class="btn ghost" href="${SOURCE_URL}#self-hosting">Set up your own</a><button`
+    : `<p>Uploading here needs a token, and the token is ours. The code is open though, so you can run your own drop on your Cloudflare account.</p>
+  <div class="row"><a class="btn" href="${SOURCE_URL}#self-hosting">Set up your own</a><button`} class="lnk" id="have" type="button" aria-controls="tokf" aria-expanded="false">I have a token</button></div>
   <form id="tokf" autocomplete="on"><label class="label" for="tok">token</label>
   <div class="row"><input id="tok" name="password" type="password" autocomplete="current-password" placeholder="Paste your API token" required><button class="btn" type="submit">Remember</button></div>
   <p class="hint err" id="tokerr" role="alert"></p></form>
@@ -365,7 +377,7 @@ ${footer()}
 </div></body></html>`;
 }
 
-const simplePage = (title: string, label: string, h1: string, p: string, action: string) => `${head(title)}
+const simplePage = (title: string, label: string, h1: string, p: string, action: string, extraCss = "") => `${head(title)}${extraCss}
 .nf{min-height:66vh;display:grid;place-items:center;text-align:center}
 .nf p{color:var(--ink60);margin:14px 0 28px;font-size:17px;max-width:32em}
 .nf form{display:inline}
@@ -431,7 +443,7 @@ export type LegalInfo = { name: string; business?: string; street: string; city:
 type LegalKind = "privacy" | "datenschutz" | "imprint" | "impressum";
 const LEGAL_UPDATED = { en: "Last updated 25 November 2026", de: "Stand: 25. November 2026" };
 
-export function legalPage(kind: LegalKind, l: LegalInfo, o: { malwareLookup: boolean; abuseEmail: string | null }) {
+export function legalPage(kind: LegalKind, l: LegalInfo, o: { malwareLookup: boolean; abuseEmail: string | null; requests?: boolean }) {
   const de = kind === "datenschutz" || kind === "impressum";
   const lang = de ? "de" : "en";
   const isPrivacy = kind === "privacy" || kind === "datenschutz";
@@ -467,7 +479,7 @@ function imprint(de: boolean, address: string, mail: string, l: LegalInfo) {
 <h2>Content uploaded by users</h2><p>Only the holder of the operator's token can upload to drop. If you still come across a file that breaks the law, email us at ${mail}. We look into every report and remove unlawful content without delay.</p>`;
 }
 
-function privacyEn(address: string, mail: string, l: LegalInfo, o: { malwareLookup: boolean; abuseEmail: string | null }) {
+function privacyEn(address: string, mail: string, l: LegalInfo, o: { malwareLookup: boolean; abuseEmail: string | null; requests?: boolean }) {
   return `<p>drop has no accounts for visitors and sets no cookies. There is no tracking or advertising, no analysis of visitors or their behavior, and no automated decision-making about you. This policy covers the personal data that is processed nonetheless when you open drop or a link to a file on it, above all your IP address, and the files themselves.</p>
 <h2>Controller</h2>${address}<p>Email: ${mail}</p>
 <h2>Hosting</h2>
@@ -477,11 +489,14 @@ function privacyEn(address: string, mail: string, l: LegalInfo, o: { malwareLook
 <p>Fonts and the code highlighter are fetched by our Worker and delivered from drop itself, so your browser doesn't contact Fontshare, jsDelivr or cdnjs.</p>
 <p>The legal basis is our legitimate interest in running drop securely and reliably (Art. 6(1)(f) GDPR). Cloudflare processes the data as our processor under a data processing agreement (Art. 28 GDPR). Cloudflare, Inc. is certified under the EU-U.S. Data Privacy Framework, for which the European Commission has adopted an adequacy decision (Art. 45 GDPR); the agreement also contains the EU standard contractual clauses. More in <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare's privacy policy</a>.</p>
 <h2>Files, texts and short links</h2>
-<p>Only we upload to drop, with a token that isn't public. Anyone who has the link to a file, text or short link can open it. For each one we store the content in Cloudflare R2 and these details in Cloudflare D1 and Workers KV: file name, type, size, upload time, expiry time, a deletion code, a checksum (SHA-256) and the number of times it was opened. The view count is a plain number; it doesn't record who opened the link.</p>
+<p>${o.requests ? "Only we and people we\u2019ve given a token can upload to drop." : "Only we upload to drop, with a token that isn\u2019t public."} Anyone who has the link to a file, text or short link can open it. For each one we store the content in Cloudflare R2 and these details in Cloudflare D1 and Workers KV: file name, type, size, upload time, expiry time, a deletion code, a checksum (SHA-256) and the number of times it was opened. The view count is a plain number; it doesn't record who opened the link.</p>
 <p>Before a photo is stored, drop removes location data (GPS) from JPEG and PNG files. For images, Cloudflare Workers AI writes a short description, used as alt text, and checks whether the image might be sensitive; Cloudflare's Images service makes a small preview. Both run at Cloudflare as our processor, and the results are stored with the file. Every upload is also checked automatically for programs and harmful content; files that fail the check are held back and can't be opened.${o.malwareLookup ? ` For this check we send the file's checksum, never the file itself, to MalwareBazaar, a database of known malware run by abuse.ch (Bern University of Applied Sciences, Switzerland, a country with an EU adequacy decision).` : ""}</p>
 <p>A file is deleted when its expiry time is reached (checked every hour) or when we delete it, together with its details and preview. If a file shows you or concerns you and you want it removed, email us${o.abuseEmail ? ` or use "Report this file" on its page` : ""}. The legal basis for storing and showing files is our legitimate interest in sharing them by link (Art. 6(1)(f) GDPR).</p>
-<h2>Your browser</h2>
-<p>If you have the operator's token and enter it on the start page, your browser keeps it in its local storage under the name "drop_token", so you don't have to enter it again. It isn't a cookie, is only sent to drop with your own requests, and is removed with "Forget token". Visitors without a token store nothing. Storing it is strictly necessary for the function you asked for (§ 25(2) no. 2 TDDDG).</p>
+${o.requests ? `<h2>Token requests</h2>
+<p>You can ask for a token with the form at /request. We store the name and the answer you enter there, the time of the request, our decision and, once you have collected it, which token was issued, in Cloudflare D1. We don't ask for your email address. Instead you get a private link; we store only a checksum of it, so we can't recover it either. We use the data only to decide on your request and to issue the token (Art. 6(1)(b) GDPR) and delete it 30 days after the request, or 14 days after approval if that is later. Tokens you collect are stored only as a checksum, with the label and expiry date we set.</p>
+<p>The form is protected by Cloudflare Turnstile, which checks whether a person or a program is filling it in. For this, your browser loads a script from challenges.cloudflare.com, and Cloudflare processes technical data about your browser and device. Requests are also counted per IP address over one minute, as described above. The legal basis is our legitimate interest in protecting the form from automated abuse (Art. 6(1)(f) GDPR); data Turnstile stores in your browser is strictly necessary for the check you start (§ 25(2) no. 2 TDDDG). More in <a href="https://www.cloudflare.com/turnstile-privacy-policy/">Cloudflare's Turnstile privacy addendum</a>.</p>
+` : ""}<h2>Your browser</h2>
+<p>If you have a token and enter it on the start page, your browser keeps it in its local storage under the name "drop_token", so you don't have to enter it again. It isn't a cookie, is only sent to drop with your own requests, and is removed with "Forget token". Visitors without a token store nothing. Storing it is strictly necessary for the function you asked for (§ 25(2) no. 2 TDDDG).</p>
 <h2>Email</h2>
 <p>If you email us, we use your address and message only to reply (Art. 6(1)(f) GDPR) and delete them once the matter is settled, unless the law requires us to keep them.</p>
 <h2>Your rights</h2>
@@ -490,7 +505,7 @@ function privacyEn(address: string, mail: string, l: LegalInfo, o: { malwareLook
 <p><strong>You may object at any time, on grounds relating to your particular situation, to the processing of your personal data based on Art. 6(1)(f) GDPR (Art. 21 GDPR).</strong></p>`;
 }
 
-function privacyDe(address: string, mail: string, l: LegalInfo, o: { malwareLookup: boolean; abuseEmail: string | null }) {
+function privacyDe(address: string, mail: string, l: LegalInfo, o: { malwareLookup: boolean; abuseEmail: string | null; requests?: boolean }) {
   return `<p>drop hat keine Benutzerkonten für Besucher und setzt keine Cookies. Es verwendet keine Tracking- oder Werbedienste, wertet weder Besucher noch ihr Verhalten aus und trifft keine automatisierten Entscheidungen über dich. Diese Erklärung beschreibt, welche personenbezogenen Daten trotzdem verarbeitet werden, wenn du drop oder einen Link zu einer Datei darauf öffnest, vor allem deine IP-Adresse, und was mit den Dateien selbst geschieht.</p>
 <h2>Verantwortlicher</h2>${address}<p>E-Mail: ${mail}</p>
 <h2>Hosting</h2>
@@ -500,15 +515,79 @@ function privacyDe(address: string, mail: string, l: LegalInfo, o: { malwareLook
 <p>Schriften und die Code-Hervorhebung lädt unser Worker selbst und liefert sie von drop aus, dein Browser verbindet sich also nicht mit Fontshare, jsDelivr oder cdnjs.</p>
 <p>Rechtsgrundlage ist unser berechtigtes Interesse an einem sicheren und zuverlässigen Betrieb von drop (Art. 6 Abs. 1 lit. f DSGVO). Cloudflare verarbeitet die Daten als unser Auftragsverarbeiter auf Grundlage eines Auftragsverarbeitungsvertrags (Art. 28 DSGVO). Cloudflare, Inc. ist nach dem EU-U.S. Data Privacy Framework zertifiziert, für das ein Angemessenheitsbeschluss der Europäischen Kommission besteht (Art. 45 DSGVO); der Vertrag enthält zusätzlich die EU-Standardvertragsklauseln. Mehr dazu in der <a href="https://www.cloudflare.com/de-de/privacypolicy/">Datenschutzerklärung von Cloudflare</a>.</p>
 <h2>Dateien, Texte und Kurzlinks</h2>
-<p>Hochladen können auf drop nur wir, mit einem Token, der nicht öffentlich ist. Wer den Link zu einer Datei, einem Text oder einem Kurzlink hat, kann ihn öffnen. Zu jedem Eintrag speichern wir den Inhalt in Cloudflare R2 und diese Angaben in Cloudflare D1 und Workers KV: Dateiname, Typ, Größe, Zeitpunkt des Hochladens, Ablaufzeitpunkt, einen Löschcode, eine Prüfsumme (SHA-256) und wie oft er aufgerufen wurde. Die Aufrufzahl ist eine bloße Zahl; wer den Link geöffnet hat, wird nicht festgehalten.</p>
+<p>${o.requests ? "Hochladen können auf drop nur wir und Personen, denen wir einen Token gegeben haben." : "Hochladen können auf drop nur wir, mit einem Token, der nicht öffentlich ist."} Wer den Link zu einer Datei, einem Text oder einem Kurzlink hat, kann ihn öffnen. Zu jedem Eintrag speichern wir den Inhalt in Cloudflare R2 und diese Angaben in Cloudflare D1 und Workers KV: Dateiname, Typ, Größe, Zeitpunkt des Hochladens, Ablaufzeitpunkt, einen Löschcode, eine Prüfsumme (SHA-256) und wie oft er aufgerufen wurde. Die Aufrufzahl ist eine bloße Zahl; wer den Link geöffnet hat, wird nicht festgehalten.</p>
 <p>Bevor ein Foto gespeichert wird, entfernt drop Standortdaten (GPS) aus JPEG- und PNG-Dateien. Für Bilder schreibt Cloudflare Workers AI eine kurze Beschreibung, die als Alternativtext dient, und prüft, ob das Bild heikel sein könnte; Cloudflares Images-Dienst erstellt eine kleine Vorschau. Beides läuft bei Cloudflare als unserem Auftragsverarbeiter, die Ergebnisse werden mit der Datei gespeichert. Außerdem wird jede Datei automatisch auf Programme und schädliche Inhalte geprüft; Dateien, die dabei auffallen, werden zurückgehalten und lassen sich nicht öffnen.${o.malwareLookup ? ` Für diese Prüfung senden wir die Prüfsumme der Datei, nie die Datei selbst, an MalwareBazaar, eine Datenbank bekannter Schadsoftware von abuse.ch (Berner Fachhochschule, Schweiz, ein Land mit Angemessenheitsbeschluss der EU).` : ""}</p>
 <p>Eine Datei wird gelöscht, wenn ihr Ablaufzeitpunkt erreicht ist (stündlich geprüft) oder wenn wir sie löschen, zusammen mit ihren Angaben und der Vorschau. Wenn eine Datei dich zeigt oder betrifft und du sie entfernt haben möchtest, schreib uns${o.abuseEmail ? `, etwa über „Report this file“ auf ihrer Seite` : ""}. Rechtsgrundlage für das Speichern und Anzeigen von Dateien ist unser berechtigtes Interesse, sie per Link zu teilen (Art. 6 Abs. 1 lit. f DSGVO).</p>
-<h2>Dein Browser</h2>
-<p>Wenn du den Token des Betreibers hast und ihn auf der Startseite eingibst, speichert dein Browser ihn in seinem lokalen Speicher unter dem Namen „drop_token“, damit du ihn nicht erneut eingeben musst. Er ist kein Cookie, wird nur mit deinen eigenen Anfragen an drop gesendet und mit „Forget token“ entfernt. Für Besucher ohne Token wird nichts gespeichert. Das Speichern ist für die von dir gewünschte Funktion unbedingt erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG).</p>
+${o.requests ? `<h2>Token-Anfragen</h2>
+<p>Über das Formular unter /request kannst du einen Token anfragen. Wir speichern den Namen und die Antwort, die du dort eingibst, den Zeitpunkt der Anfrage, unsere Entscheidung und, sobald du ihn abgeholt hast, welcher Token ausgegeben wurde, in Cloudflare D1. Nach deiner E-Mail-Adresse fragen wir nicht. Stattdessen bekommst du einen privaten Link; davon speichern wir nur eine Prüfsumme, können ihn also auch selbst nicht wiederherstellen. Wir nutzen die Daten nur, um über deine Anfrage zu entscheiden und den Token auszugeben (Art. 6 Abs. 1 lit. b DSGVO), und löschen sie 30 Tage nach der Anfrage, oder 14 Tage nach der Freigabe, falls das später ist. Abgeholte Tokens werden nur als Prüfsumme gespeichert, mit der Bezeichnung und dem Ablaufdatum, die wir festlegen.</p>
+<p>Das Formular ist durch Cloudflare Turnstile geschützt, das prüft, ob ein Mensch oder ein Programm es ausfüllt. Dazu lädt dein Browser ein Skript von challenges.cloudflare.com, und Cloudflare verarbeitet technische Daten über deinen Browser und dein Gerät. Außerdem werden Anfragen je IP-Adresse über eine Minute gezählt, wie oben beschrieben. Rechtsgrundlage ist unser berechtigtes Interesse, das Formular vor automatisiertem Missbrauch zu schützen (Art. 6 Abs. 1 lit. f DSGVO); was Turnstile dafür in deinem Browser speichert, ist für die von dir gestartete Prüfung unbedingt erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG). Mehr dazu im <a href="https://www.cloudflare.com/turnstile-privacy-policy/">Turnstile-Datenschutzhinweis von Cloudflare</a>.</p>
+` : ""}<h2>Dein Browser</h2>
+<p>Wenn du einen Token hast und ihn auf der Startseite eingibst, speichert dein Browser ihn in seinem lokalen Speicher unter dem Namen „drop_token“, damit du ihn nicht erneut eingeben musst. Er ist kein Cookie, wird nur mit deinen eigenen Anfragen an drop gesendet und mit „Forget token“ entfernt. Für Besucher ohne Token wird nichts gespeichert. Das Speichern ist für die von dir gewünschte Funktion unbedingt erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG).</p>
 <h2>E-Mail</h2>
 <p>Wenn du uns schreibst, nutzen wir deine Adresse und Nachricht nur, um dir zu antworten (Art. 6 Abs. 1 lit. f DSGVO), und löschen sie, sobald die Sache erledigt ist, es sei denn, das Gesetz verpflichtet uns zur Aufbewahrung.</p>
 <h2>Deine Rechte</h2>
 <p>Du hast das Recht auf Auskunft über deine personenbezogenen Daten (Art. 15 DSGVO), auf Berichtigung (Art. 16), Löschung (Art. 17), Einschränkung der Verarbeitung (Art. 18) und Datenübertragbarkeit (Art. 20). Schreib uns dazu eine E-Mail. Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren (Art. 77 DSGVO), etwa bei der an deinem Wohnort oder bei der für uns zuständigen: ${esc(l.authority)}.</p>
 <h2>Widerspruchsrecht</h2>
 <p><strong>Du kannst der Verarbeitung deiner personenbezogenen Daten auf Grundlage von Art. 6 Abs. 1 lit. f DSGVO jederzeit aus Gründen widersprechen, die sich aus deiner besonderen Situation ergeben (Art. 21 DSGVO).</strong></p>`;
+}
+
+// ---------- token requests ----------
+const REQ_CSS = `.req{display:grid;grid-template-columns:1.1fr 1fr;gap:clamp(24px,5vw,64px);padding:clamp(32px,6vw,64px) 0 0;align-items:start}
+.req h1{font-size:clamp(34px,4.8vw,56px);line-height:1.04}
+.req .lead{font-size:17px;color:var(--ink60);margin:18px 0 0;max-width:30em}
+.req form{display:grid;gap:16px}
+.req label.f{display:grid;gap:6px;font:500 14px/1.3 var(--sans)}
+.req textarea{min-height:120px;font:15px/1.55 var(--sans)}
+.req .small{font-size:13px;color:var(--ink60);margin:0}
+.req .err{color:var(--root);font-size:14px;margin:0}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.code{display:flex;align-items:center;gap:10px;background:var(--ink);color:#f4eef0;border-radius:14px;padding:12px 12px 12px 18px;margin:22px auto 0;max-width:36em;text-align:left}
+.code code{flex:1;font:500 14px/1.5 var(--mono);word-break:break-all}
+.code button{appearance:none;border:0;border-radius:999px;background:rgba(255,255,255,.12);color:#f4eef0;font:500 12px/1 var(--mono);padding:8px 12px;cursor:pointer}
+.code button:hover{background:var(--bloom)}
+@media (max-width:760px){.req{grid-template-columns:1fr}}`;
+const COPY_JS = `<script>document.querySelectorAll('[data-copy]').forEach(function(b){b.onclick=function(){navigator.clipboard.writeText(b.dataset.copy).then(function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1600)},function(){})}})</script>`;
+const codeBox = (v: string) => `<div class="code"><code>${esc(v)}</code><button type="button" data-copy="${esc(v)}">Copy</button></div>`;
+
+/** Public form to ask for an API token. Protected by Turnstile (and, at the edge, a managed challenge). */
+export function requestPage(siteKey: string, o: { error?: string; name?: string; reason?: string } = {}) {
+  return `${head("Ask for a token · drop.", `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>`)}${REQ_CSS}</style></head><body><div class="wrap">${topbar()}
+<section class="req">
+  <div><span class="label">token request</span><h1 style="margin-top:14px">Ask for a token<em>.</em></h1>
+  <p class="lead">Uploads here need a token. Tell us who you are and what you want to share, and we’ll take a look. If it’s a yes, you collect the token through a private link.</p></div>
+  <form class="panel" method="post" action="/request">
+    <label class="f">Your name<input name="name" required minlength="2" maxlength="80" autocomplete="name" value="${esc(o.name || "")}"></label>
+    <label class="f">What do you want to upload?<textarea name="reason" required minlength="10" maxlength="600" placeholder="Screenshots from ShareX for our team chat">${esc(o.reason || "")}</textarea></label>
+    <div class="hp" aria-hidden="true"><label>Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label></div>
+    <div class="cf-turnstile" data-sitekey="${esc(siteKey)}" data-action="token-request" data-theme="light" data-size="flexible"></div>
+    ${o.error ? `<p class="err" role="alert">${esc(o.error)}</p>` : ""}
+    <div class="row"><button class="btn" type="submit">Send request</button></div>
+    <p class="small">We keep your name and answer for 30 days, then delete them. More in the <a href="/privacy">privacy policy</a>.</p>
+  </form>
+</section>
+${footer()}
+</div></body></html>`;
+}
+
+/** After sending: the claim link is shown once. */
+export function requestSentPage(claimUrl: string) {
+  return simplePage("Request sent · drop.", "request sent", "Request sent<em>.</em>", "Keep this link. It’s the only way to collect your token once it’s approved, and we can’t show it to you again.", `${codeBox(claimUrl)}${COPY_JS}`, REQ_CSS);
+}
+
+/** What the claim link shows, depending on where the request stands. */
+export function requestStatusPage(state: "pending" | "approved" | "rejected" | "claimed" | "lapsed") {
+  const back = `<a class="btn" href="/">Back to drop</a>`;
+  switch (state) {
+    case "pending": return simplePage("In review · drop.", "in review", "Still in review<em>.</em>", "Nobody has looked at your request yet. This link keeps working, so check back later.", back);
+    case "approved": return simplePage("Approved · drop.", "approved", "Approved<em>.</em>", "Your token is ready. It’s shown only once, so have somewhere to paste it.", `<form method="post"><button class="btn" type="submit">Show my token</button></form>`);
+    case "rejected": return simplePage("Not approved · drop.", "not approved", "Not approved<em>.</em>", "Sorry, we can’t give you a token for this.", back);
+    case "claimed": return simplePage("Collected · drop.", "collected", "Already collected<em>.</em>", "This token was shown once and can’t be shown again. If you lost it, ask for a new one.", `<a class="btn" href="/request">Ask again</a>`);
+    case "lapsed": return simplePage("Expired · drop.", "expired", "This link has run out<em>.</em>", "Approved tokens have to be collected within 14 days. Ask again and we’ll take another look.", `<a class="btn" href="/request">Ask again</a>`);
+  }
+}
+
+/** The token, shown exactly once. */
+export function tokenShownPage(secret: string, expiresAt: number | null) {
+  const until = expiresAt ? `It works until <time datetime="${new Date(expiresAt * 1000).toISOString()}">${new Date(expiresAt * 1000).toISOString().slice(0, 10)}</time>.` : "It doesn’t expire.";
+  return simplePage("Your token · drop.", "your token", "Here’s your token<em>.</em>", `Copy it now. It won’t be shown again. ${until} Paste it into drop’s token field to upload and to get your ShareX configs.`, `${codeBox(secret)}<p style="margin:22px 0 0"><a class="btn" href="/">Open drop</a></p>${COPY_JS}`, REQ_CSS);
 }
