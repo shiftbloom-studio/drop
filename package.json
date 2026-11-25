@@ -1,18 +1,23 @@
 {
   "name": "drop",
   "version": "0.1.0",
-  "description": "ShareX-compatible file host, pastebin and URL shortener on Cloudflare Workers",
+  "description": "ShareX-compatible file host, pastebin and URL shortener for Cloudflare Workers or Node.js",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning dist/node/server.js",
+    "dev:node": "npm run build:node && npm start",
+    "token": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning dist/node/server.js token",
     "typecheck": "tsc -p .",
     "db:migrate": "wrangler d1 migrations apply drop-db --remote",
     "build": "esbuild src/index.ts --bundle --format=esm --minify --target=es2022 --external:./ui.js --outfile=dist/index.js && esbuild src/ui.ts --bundle --format=esm --minify --target=es2022 --outfile=dist/ui.js",
+    "build:node": "esbuild src/node/server.ts --bundle --platform=node --format=esm --target=node26 --outfile=dist/node/server.js",
     "test": "vitest run",
-    "check": "tsc -p . && vitest run && npm run build"
+    "check": "tsc -p . && vitest run && npm run build && npm run build:node"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261125.1",
+    "@types/node": "^26.6.10",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
     "vitest": "^3.2.7",

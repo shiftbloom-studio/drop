@@ -1,0 +1,11 @@
+node_modules
+dist
+.wrangler
+data
+.git
+.github
+.env
+.dev.vars
+*.sxcu
+coverage
+test
