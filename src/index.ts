@@ -1,14 +1,16 @@
 /**
- * drop — ShareX-compatible file host, pastebin and URL shortener on Cloudflare Workers.
+ * drop — ShareX-compatible file host, pastebin and URL shortener on Cloudflare Workers
+ * (or on Node.js through src/node, which provides the same bindings backed by disk and SQLite).
  * Storage: R2 (blobs + thumbnails), D1 (metadata, source of truth), KV (hot lookup cache for short ids).
  * Background: Queue consumer builds thumbnails (Images binding) and alt text + NSFW flag (Workers AI).
  */
 import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, deletePage, legalPage, configureUi, requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "./ui.js";
 import { CLAIM_WINDOW, KEEP_REQUESTS, MAX_PENDING, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile, type RequestRow } from "./requests";
 import { sniff, blockReason, effectiveType, INLINE_TYPES, stripJpegLocation, stripPngLocation, inspectZip } from "./safety";
+import { brandFrom, type BrandEnv } from "./brand";
 import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName, robotsTxt, ownerFilter, canManage, MASTER_OWNER, type Principal } from "./util";
 
-export interface Env {
+export interface Env extends BrandEnv {
   FILES: R2Bucket;
   DB: D1Database;
   LINKS: KVNamespace;
@@ -495,7 +497,7 @@ async function analyze(env: Env, id: string) {
 }
 
 /** Background safety pass for every upload: content hash, archive contents, optional malware hash lookup.
- * Runs on Cloudflare (Queue consumer), never on a local machine. Images go on to `analyze`. */
+ * Runs as a Queue consumer (on Node.js: the in-process queue), never in the uploader's browser. Images go on to `analyze`. */
 async function scanFile(env: Env, id: string) {
   const it = await env.DB.prepare("SELECT * FROM items WHERE id = ?").bind(id).first<Item>();
   if (!it || !it.r2_key || it.kind !== "file") return;
@@ -573,7 +575,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const m = req.method;
 
   if (m === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
-  if (path === "/" && (m === "GET" || m === "HEAD")) return new Response(landingPage(url.host, { multiMb: Number(env.MAX_MULTIPART_MB || 95), maxMb: Number(env.MAX_STREAM_MB || 500) }), { headers: htmlHeaders("public, max-age=300") });
+  if (path === "/" && (m === "GET" || m === "HEAD")) return new Response(landingPage(url.host, { multiMb: Number(env.MAX_MULTIPART_MB || 95), maxMb: Number(env.MAX_STREAM_MB || 500) }, url.origin), { headers: htmlHeaders("public, max-age=300") });
   // SEO: only the landing page is meant to be found; uploads carry X-Robots-Tag: noindex (see fetch below).
   if (path === "/robots.txt") return new Response(robotsTxt(url.origin), { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } });
   if (path === "/sitemap.xml") return new Response(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${url.origin}/</loc><changefreq>monthly</changefreq></url></urlset>\n`, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=3600" } });
@@ -675,7 +677,7 @@ function corsHeaders() {
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
     try {
-      configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET) });
+      configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), brand: brandFrom(env) });
       const res = await route(req, env, ctx);
       const path = new URL(req.url).pathname;
       if (INDEXABLE.has(path) || path.startsWith("/assets/")) return res;

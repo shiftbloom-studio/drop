@@ -27,7 +27,7 @@ export async function handleAsset(req: Request, ctx: ExecutionContext): Promise<
   if (p === "/llms.txt")
     return new Response(llmsTxt(url.origin), { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } });
   if (p === "/og-card")
-    return new Response(ogCardPage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+    return new Response(ogCardPage(url.host), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
   if (p === "/assets/fonts.css")
     return cached(req, ctx, async () => {
       let cssText = "";

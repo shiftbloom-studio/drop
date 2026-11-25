@@ -18,6 +18,9 @@
   "vars": {
     "MAX_MULTIPART_MB": "95",
     "MAX_STREAM_MB": "500"
+    // Optional: who runs this instance (footer, page metadata) and where your source is (AGPL section 13).
+    // "OPERATOR_NAME": "Jane Doe", "OPERATOR_URL": "https://example.com", "OPERATOR_PLACE": "Berlin",
+    // "SOURCE_URL": "https://github.com/you/drop",
     // Optional: shows "Report this file" on item pages.
     // "ABUSE_EMAIL": "abuse@example.com",
     // Optional: operator details for /imprint, /impressum, /privacy and /datenschutz (hidden when unset).

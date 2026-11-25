@@ -1,6 +1,6 @@
 # drop.
 
-drop is where shiftbloom studio's screenshots go before they get sent anywhere. It's one Cloudflare Worker. Files land in R2 and you get back a five-character link on your own domain. Text pastes and short URLs use the same kind of link, and ShareX can upload to it directly.
+drop is where shiftbloom studio's screenshots go before they get sent anywhere. It's one Cloudflare Worker, or one Node.js process if you'd rather run it yourself. Files land in R2 (or a folder on disk) and you get back a five-character link on your own domain. Text pastes and short URLs use the same kind of link, and ShareX can upload to it directly.
 
 It runs at [drop.shiftbloom.studio](https://drop.shiftbloom.studio) and is made by [shiftbloom studio](https://shiftbloom.studio). The code is licensed under AGPL-3.0-or-later.
 
@@ -32,6 +32,18 @@ Worker "drop"  ── index.js (API, routing)  +  ui.js (pages, Bloom SVG, asset
 Cron (hourly) → delete expired items from R2, KV and D1
 ```
 
+The same code also runs on Node.js. `src/node/` provides each binding with a local stand-in, so the Worker itself has no idea where it runs:
+
+| On Cloudflare | On Node.js (`src/node/bindings.ts`) |
+| --- | --- |
+| R2 `FILES` | files in `DATA_DIR/files`, stored under the SHA-256 of their key |
+| D1 `DB` | SQLite file `DATA_DIR/drop.sqlite` (built-in `node:sqlite`, no native modules), same migrations |
+| KV `LINKS` | in-memory cache (KV only ever holds copies of D1 rows) |
+| Queue `JOBS` | in-process queue with retries |
+| Rate limiting | in-memory limiter with the same limits |
+| Cron | hourly timer |
+| Images, Workers AI | not available: no WebP thumbnails, alt text or NSFW flag. Everything else works. |
+
 | Binding | Type | Default name | Purpose |
 | --- | --- | --- | --- |
 | `FILES` | R2 bucket | `drop-files` | `f/<id>/<name>`, `p/<id>.txt`, `t/<id>.webp` |
@@ -44,6 +56,71 @@ Cron (hourly) → delete expired items from R2, KV and D1
 | `MAX_MULTIPART_MB` / `MAX_STREAM_MB` | vars | `95` / `500` | upload limits |
 
 ## Self-hosting
+
+There are two ways to run your own drop. Both use the same code, migrations and API, and ShareX can't tell them apart.
+
+- **Cloudflare Workers**: R2, D1, KV and Queues, plus thumbnails and alt text from the Images binding and Workers AI. Scales to zero and costs cents.
+- **Node.js or Docker**: one process, files on disk, metadata in SQLite. Runs on a homelab box, a VPS or your laptop with no Cloudflare account.
+
+Settings that both share (vars on Cloudflare, environment variables on Node.js):
+
+| Setting | Purpose |
+| --- | --- |
+| `API_TOKEN` | required, master token (a secret on Cloudflare) |
+| `MAX_MULTIPART_MB` / `MAX_STREAM_MB` | upload limits, default `95` / `500` |
+| `OPERATOR_NAME`, `OPERATOR_URL`, `OPERATOR_PLACE` | who runs the instance, shown in the footer and the page metadata. Without them the pages name nobody. |
+| `SOURCE_URL` | where your copy of the code lives (AGPL section 13). Defaults to this repository. |
+| `ABUSE_EMAIL`, `LEGAL` | report link and legal pages, see [Legal pages](#legal-pages) |
+| `MB_AUTH_KEY` | optional MalwareBazaar lookups |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | optional [token requests](#token-requests) |
+
+### Run with Node.js or Docker
+
+With Docker Compose:
+
+```sh
+git clone https://github.com/shiftbloom-studio/drop && cd drop
+cp .env.example .env        # set API_TOKEN (openssl rand -base64 32) and PUBLIC_URL
+docker compose up -d        # http://127.0.0.1:8787, data in the drop-data volume
+```
+
+Without Docker you need Node.js 26:
+
+```sh
+npm install
+cp .env.example .env
+npm run build:node
+npm start                   # reads .env, stores everything in ./data
+```
+
+The database schema is applied on start. Three settings only exist on Node.js:
+
+- `PUBLIC_URL`: the address people reach drop at, for example `https://drop.example.com`. drop builds its links from it. Without it, links use the request's `Host` header.
+- `TRUST_PROXY`: behind a reverse proxy, the header with the client's IP (`x-forwarded-for`, `x-real-ip` or `cf-connecting-ip`). Rate limits key on it. Leave it unset when clients connect directly, since anyone can send that header.
+- `DATA_DIR`, `PORT`, `HOST`: where files and `drop.sqlite` live (default `./data`, `/data` in Docker), and where to listen (default `0.0.0.0:8787`).
+
+Put drop behind a reverse proxy that handles TLS (Caddy, nginx, Traefik or a Cloudflare Tunnel) and allows request bodies up to `MAX_STREAM_MB`. With Caddy that's all it takes:
+
+```
+drop.example.com {
+  reverse_proxy 127.0.0.1:8787
+}
+```
+
+Then set `PUBLIC_URL=https://drop.example.com` and `TRUST_PROXY=x-forwarded-for`.
+
+Named tokens come from the command line, since there's no admin screen ([field](https://github.com/shiftbloom-studio/field) does this on Cloudflare):
+
+```sh
+npm run token -- create laptop --days 90     # prints the token once
+npm run token -- list
+npm run token -- revoke <id>
+# in Docker: docker compose exec drop node dist/node/server.js token create laptop
+```
+
+Back up `DATA_DIR` while drop is stopped, or copy `drop.sqlite` with `sqlite3 drop.sqlite ".backup backup.sqlite"` and the `files` folder next to it.
+
+### Run on Cloudflare Workers
 
 You need a Cloudflare account with Workers Paid, which Queues require. R2, D1 and KV are enabled on the account.
 
@@ -66,7 +143,7 @@ npx wrangler secret put API_TOKEN           # use a long random string
 npm run deploy
 ```
 
-The config turns the `workers.dev` address off, because it bypasses the zone's WAF and rate limiting rules. Without a custom domain, set `"workers_dev": true` and the worker answers on `drop.<your-subdomain>.workers.dev`. To run without AI or thumbnails, remove the `ai`/`images` bindings. Everything else keeps working.
+Set the optional vars from the table above in `wrangler.jsonc`. The config turns the `workers.dev` address off, because it bypasses the zone's WAF and rate limiting rules. Without a custom domain, set `"workers_dev": true` and the worker answers on `drop.<your-subdomain>.workers.dev`. To run without AI or thumbnails, remove the `ai`/`images` bindings. Everything else keeps working.
 
 ### Deploy from GitHub Actions
 
@@ -77,11 +154,11 @@ The config turns the `workers.dev` address off, because it bypasses the zone's W
 ```sh
 cp .dev.vars.example .dev.vars              # set API_TOKEN
 npx wrangler d1 migrations apply drop-db --local
-npm run dev                                 # http://localhost:8787
-npm run check                               # typecheck + tests + build
+npm run dev                                 # Workers runtime, http://localhost:8787
+npm run check                               # typecheck, tests, Worker and Node builds
 ```
 
-Workers AI and Images need a Cloudflare connection. Locally they fail gracefully, so uploads work and only the thumbnail and alt text are missing.
+Workers AI and Images need a Cloudflare connection. Locally they fail gracefully, so uploads work and only the thumbnail and alt text are missing. To try the Node.js version instead, run `npm run dev:node` with an `.env` file.
 
 ## API
 
@@ -161,7 +238,8 @@ Approved tokens have to be collected within 14 days. Requests are deleted 30 day
 - drop looks at the first bytes of every upload instead of trusting the file name or the client's content type. Programs, scripts, installers, disk images and Office files with macros are refused, also when they are renamed.
 - Only passive types (common images, audio, video, PDF and plain text) are shown inline. Everything else, including HTML and SVG, is served as `application/octet-stream` with `Content-Disposition: attachment`. Raw files also get `Content-Security-Policy: sandbox`, so nothing uploaded runs script on your origin.
 - Location data (GPS) is removed from JPEG and PNG uploads before they are stored. The image itself isn't re-encoded.
-- A queue job checks every upload in the background on Cloudflare: it hashes the file, looks inside ZIP archives for programs and macros, refuses encrypted archives, and, if you set `MB_AUTH_KEY`, looks the hash up in [MalwareBazaar](https://bazaar.abuse.ch/). Files that fail are put on hold (HTTP 451) instead of being deleted. The operator releases one with `POST /api/items/<id>?release` using the master token (`API_TOKEN`); named tokens get 403.
+- A queue job checks every upload in the background: it hashes the file, looks inside ZIP archives for programs and macros, refuses encrypted archives, and, if you set `MB_AUTH_KEY`, looks the hash up in [MalwareBazaar](https://bazaar.abuse.ch/). Files that fail are put on hold (HTTP 451) instead of being deleted. The operator releases one with `POST /api/items/<id>?release` using the master token (`API_TOKEN`); named tokens get 403.
+- On Node.js the same checks run in-process. Behind a proxy, set `TRUST_PROXY` so rate limits see real client addresses; drop always replaces any `cf-connecting-ip` header a client sends.
 - If your zone has Cloudflare's malicious uploads detection and the "Add malicious uploads detection header" managed transform, drop refuses uploads the scanner flags and holds the ones it couldn't scan.
 - Deletion links ask before they delete, so link previews and crawlers can't remove files by opening them.
 - Delete tokens and the master token are compared in constant time. Named tokens are stored only as SHA-256 hashes.
@@ -174,7 +252,7 @@ Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 
 ## Design
 
-The UI follows the shiftbloom studio brand book: white paper and ink, Bloom Red `#FF2E52` as the only accent, the Bloom mark drawn as SVG from its construction spec, the shiftbloom studio wordmark, mono labels in small caps and a few sprinkles in the margins. Type is set in Clash Display, General Sans and JetBrains Mono. Motion uses the Bloom Ease `cubic-bezier(.22,1.1,.36,1)`. When you fork, you are welcome to restyle `src/html.ts`.
+The UI follows the shiftbloom studio brand book: white paper and ink, Bloom Red `#FF2E52` as the only accent, the Bloom mark drawn as SVG from its construction spec, the shiftbloom studio wordmark, mono labels in small caps and a few sprinkles in the margins. Type is set in Clash Display, General Sans and JetBrains Mono. Motion uses the Bloom Ease `cubic-bezier(.22,1.1,.36,1)`. When you fork, you are welcome to restyle `src/html.ts`. The shiftbloom studio wordmark only appears when `BRAND` is set to `shiftbloom`, which is how drop.shiftbloom.studio runs. Set the `OPERATOR_*` settings for your own name instead.
 
 `src/ui.ts` ships as its own module (`ui.js`), so you can change the look without touching the API code.
 
@@ -192,4 +270,4 @@ Copyright © 2026 shiftbloom studio and contributors.
 
 drop is free software: you can redistribute it and/or modify it under the terms of the [GNU Affero General Public License](LICENSE) as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
-If you run a modified version for others over a network, AGPL section 13 requires you to offer those users your source code. The footer's *source* link exists for this. Point `SOURCE_URL` in `src/html.ts` at your fork.
+If you run a modified version for others over a network, AGPL section 13 requires you to offer those users your source code. The footer's *source* link exists for this. Set `SOURCE_URL` to your fork.

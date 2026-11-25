@@ -1,0 +1,13 @@
+# drop with Docker Compose: cp .env.example .env, set API_TOKEN, then `docker compose up -d`.
+services:
+  drop:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8787:8787" # put a reverse proxy with TLS in front, see README
+    volumes:
+      - drop-data:/data
+
+volumes:
+  drop-data:

@@ -1,4 +1,5 @@
 import { bloomSvg, faviconSvg } from "./bloom";
+import { brandFrom, type Brand } from "./brand";
 import type { Item } from "./index";
 
 /* drop — UI following the shiftbloom studio brand book v2.
@@ -81,42 +82,48 @@ const head = (title: string, extra = "", index = false, lang = "en") => `<!docty
 <title>${esc(title)}</title>${index ? "" : `<meta name="robots" content="noindex">`}<meta name="theme-color" content="#ffffff">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/fonts.css">${extra}<style>${css}`;
 
-/** Wordmark per brand book: "shiftbloom" semibold, "studio" regular at 60% ink, red seed period. */
-const STUDIO = `<a class="sb" href="https://shiftbloom.studio" aria-label="shiftbloom studio">shiftbloom<span>studio</span><i>.</i></a>`;
+/** Set per request from the Worker's config: which optional links the pages show and who runs the instance. */
+let UI: { legal: boolean; abuseEmail: string | null; requests?: boolean; brand?: Brand } = { legal: false, abuseEmail: null, requests: false };
+let BRAND: Brand = brandFrom();
+export function configureUi(c: typeof UI) { UI = c; BRAND = c.brand ?? brandFrom(); }
 
-const topbar = (right = "") => `<header class="top"><a class="brand" href="/" aria-label="drop — shiftbloom studio">${bloom({ size: 30, id: "tb" })}<span class="word">drop<i>.</i></span></a>${right}</header>`;
+/** Operator mark: the shiftbloom studio wordmark per brand book ("shiftbloom" semibold, "studio" regular
+ * at 60% ink, red seed period) for the upstream preset, otherwise the operator's name as text. */
+function operatorMark(cls = "sb") {
+  const o = BRAND.operator;
+  if (!o) return "";
+  const inner = BRAND.studioWordmark ? `shiftbloom<span>studio</span><i>.</i>` : esc(o.name);
+  return o.url ? `<a class="${cls}" href="${esc(o.url)}" aria-label="${esc(o.name)}">${inner}</a>` : `<span class="${cls}">${inner}</span>`;
+}
 
-/** AGPL §13: users interacting over a network must be offered the source. Forks: point this at your repo. */
-export const SOURCE_URL = "https://github.com/shiftbloom-studio/drop";
+const topbar = (right = "") => `<header class="top"><a class="brand" href="/" aria-label="${esc(BRAND.operator ? `drop \u2014 ${BRAND.operator.name}` : "drop")}">${bloom({ size: 30, id: "tb" })}<span class="word">drop<i>.</i></span></a>${right}</header>`;
 
-/** Set per request from the Worker's config: which optional links the pages show. */
-let UI: { legal: boolean; abuseEmail: string | null; requests?: boolean } = { legal: false, abuseEmail: null, requests: false };
-export function configureUi(c: typeof UI) { UI = c; }
+/** AGPL §13: users interacting over a network must be offered the source. Set SOURCE_URL to your fork. */
+const sourceUrl = () => BRAND.sourceUrl;
 
-const footer = (lang: "en" | "de" = "en") => `<footer class="foot"><p>${lang === "de" ? "drop ist Open Source unter AGPL-3.0." : "drop is open source under AGPL-3.0."} <a href="${SOURCE_URL}">${lang === "de" ? "Zum Code" : "Read the code"}</a>${UI.legal ? (lang === "de" ? ` · <a href="/datenschutz">Datenschutz</a> · <a href="/impressum">Impressum</a>` : ` · <a href="/privacy">Privacy</a> · <a href="/imprint">Imprint</a>`) : ""}</p><p>${STUDIO} · hamburg</p></footer>`;
+const footer = (lang: "en" | "de" = "en") => `<footer class="foot"><p>${lang === "de" ? "drop ist Open Source unter AGPL-3.0." : "drop is open source under AGPL-3.0."} <a href="${esc(sourceUrl())}">${lang === "de" ? "Zum Code" : "Read the code"}</a>${UI.legal ? (lang === "de" ? ` · <a href="/datenschutz">Datenschutz</a> · <a href="/impressum">Impressum</a>` : ` · <a href="/privacy">Privacy</a> · <a href="/imprint">Imprint</a>`) : ""}</p>${BRAND.operator ? `<p>${operatorMark()}${BRAND.operator.place ? ` · ${esc(BRAND.operator.place)}` : ""}</p>` : ""}</footer>`;
 
 // ---------- landing ----------
-const SITE_TITLE = "drop. · shiftbloom studio";
-const SITE_DESC = "The file host behind shiftbloom studio’s screenshot links. It runs on a single Cloudflare Worker, and the code is on GitHub.";
 
 function landingMeta(origin: string) {
+  const o = BRAND.operator, SITE_TITLE = BRAND.siteTitle, SITE_DESC = BRAND.description;
   const ld = {
     "@context": "https://schema.org",
     "@type": "WebApplication",
     name: "drop",
     url: `${origin}/`,
-    description: SITE_DESC,
+    description: BRAND.description,
     applicationCategory: "UtilitiesApplication",
     operatingSystem: "Web, Windows (ShareX)",
     inLanguage: "en",
     isAccessibleForFree: true,
     license: "https://www.gnu.org/licenses/agpl-3.0.html",
     offers: { "@type": "Offer", price: "0", priceCurrency: "EUR" },
-    publisher: { "@type": "Organization", "@id": "https://shiftbloom.studio/#org", name: "shiftbloom studio", url: "https://shiftbloom.studio" },
-    sameAs: [SOURCE_URL],
+    ...(o ? { publisher: { "@type": "Organization", ...(o.url ? { "@id": `${o.url.replace(/\/+$/, "")}/#org` } : {}), name: o.name, ...(o.url ? { url: o.url } : {}) } } : {}),
+    sameAs: [sourceUrl()],
   };
   return `<meta name="description" content="${esc(SITE_DESC)}"><link rel="canonical" href="${esc(origin)}/">
-<meta property="og:type" content="website"><meta property="og:site_name" content="shiftbloom studio"><meta property="og:locale" content="en_US">
+<meta property="og:type" content="website"><meta property="og:site_name" content="${esc(o?.name ?? "drop")}"><meta property="og:locale" content="en_US">
 <meta property="og:title" content="${esc(SITE_TITLE)}"><meta property="og:description" content="${esc(SITE_DESC)}"><meta property="og:url" content="${esc(origin)}/">
 <meta property="og:image" content="${esc(origin)}/og.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="drop. Every file gets five characters.">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${esc(origin)}/og.png">
@@ -125,10 +132,10 @@ function landingMeta(origin: string) {
 
 export type Limits = { multiMb: number; maxMb: number };
 
-export function landingPage(host: string, lim: Limits = { multiMb: 95, maxMb: 500 }) {
+export function landingPage(host: string, lim: Limits = { multiMb: 95, maxMb: 500 }, origin = `https://${host}`) {
   // the token check runs before first paint, so visitors never see the tool flash
   const early = `<script>try{if(localStorage.getItem('drop_token'))document.documentElement.classList.add('authed')}catch(e){}</script>`;
-  return `${head(SITE_TITLE, `${early}${landingMeta(`https://${host}`)}`, true)}
+  return `${head(BRAND.siteTitle, `${early}${landingMeta(origin)}`, true)}
 html.authed .anon,html:not(.authed) .member{display:none!important}
 html:not(.want) #tokf{display:none}
 .hero{display:grid;grid-template-columns:1.5fr 1fr;align-items:center;gap:32px;padding:clamp(32px,6vw,64px) 0 clamp(24px,4vw,40px)}
@@ -190,7 +197,7 @@ td.undo{color:var(--ink60);padding:18px 8px}
 @media (max-width:760px){.hero{grid-template-columns:1fr;align-items:start}.art{display:none}td.m,th.m{display:none}.mm{display:block}}
 </style></head><body>
 <div class="wrap">
-${topbar(`<div class="who"><span class="member">token saved</span><span class="member" aria-hidden="true">·</span><button class="lnk member" id="logout" type="button">Forget token</button>${STUDIO.replace('class="sb"', 'class="sb anon"')}</div>`)}
+${topbar(`<div class="who"><span class="member">token saved</span><span class="member" aria-hidden="true">·</span><button class="lnk member" id="logout" type="button">Forget token</button>${operatorMark("sb anon")}</div>`)}
 <section class="hero">
   <div><span class="label member" id="stats"></span>
   <h1 style="margin-top:14px">Every file gets five characters<em>.</em></h1>
@@ -202,9 +209,9 @@ ${topbar(`<div class="who"><span class="member">token saved</span><span class="m
 <section class="panel gate anon" aria-labelledby="gate-h">
   <h2 id="gate-h">This one’s private.</h2>${UI.requests
     ? `<p>Uploading here needs a token. You can ask us for one, or set up your own drop on Cloudflare with the open source code.</p>
-  <div class="row"><a class="btn" href="/request">Ask for a token</a><a class="btn ghost" href="${SOURCE_URL}#self-hosting">Set up your own</a><button`
+  <div class="row"><a class="btn" href="/request">Ask for a token</a><a class="btn ghost" href="${esc(sourceUrl())}#self-hosting">Set up your own</a><button`
     : `<p>Uploading here needs a token, and the token is ours. The code is open though, so you can run your own drop on your Cloudflare account.</p>
-  <div class="row"><a class="btn" href="${SOURCE_URL}#self-hosting">Set up your own</a><button`} class="lnk" id="have" type="button" aria-controls="tokf" aria-expanded="false">I have a token</button></div>
+  <div class="row"><a class="btn" href="${esc(sourceUrl())}#self-hosting">Set up your own</a><button`} class="lnk" id="have" type="button" aria-controls="tokf" aria-expanded="false">I have a token</button></div>
   <form id="tokf" autocomplete="on"><label class="label" for="tok">token</label>
   <div class="row"><input id="tok" name="password" type="password" autocomplete="current-password" placeholder="Paste your API token" required><button class="btn" type="submit">Remember</button></div>
   <p class="hint err" id="tokerr" role="alert"></p></form>
@@ -313,7 +320,7 @@ export function viewPage(it: Item, l: { url: string; raw: string | null; thumbna
   const isPdf = mime === "application/pdf";
   const firstLine = (pasteText || "").split("\n").map((x) => x.trim()).find(Boolean) || "";
   const desc = it.kind === "paste" ? firstLine.slice(0, 200) || "Empty paste" : it.alt || `${fmtSize(it.size)} · ${mime}`;
-  let og = `<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${esc(l.url)}"><meta property="og:site_name" content="drop · shiftbloom studio"><meta name="twitter:title" content="${esc(title)}"><meta name="theme-color" content="#FF2E52">`;
+  let og = `<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${esc(l.url)}"><meta property="og:site_name" content="${esc(BRAND.operator ? `drop · ${BRAND.operator.name}` : "drop")}"><meta name="twitter:title" content="${esc(title)}"><meta name="theme-color" content="#FF2E52">`;
   if (!(isVid && !it.nsfw)) og += `<meta property="og:type" content="website">`;
   if (isImg && !it.nsfw) og += `<meta property="og:image" content="${esc(l.raw)}">${it.width && it.height ? `<meta property="og:image:width" content="${it.width}"><meta property="og:image:height" content="${it.height}">` : ""}<meta property="og:image:type" content="${esc(mime)}"><meta property="og:image:alt" content="${esc(it.alt || title)}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${esc(l.raw)}">`;
   if (isVid && !it.nsfw) og += `<meta property="og:type" content="video.other"><meta property="og:video" content="${esc(l.raw)}"><meta property="og:video:type" content="${esc(mime)}"><meta property="og:video:secure_url" content="${esc(l.raw)}">${it.width && it.height ? `<meta property="og:video:width" content="${it.width}"><meta property="og:video:height" content="${it.height}">` : ""}<meta name="twitter:card" content="player">`;
@@ -399,7 +406,7 @@ export function deletePage(name: string, done: boolean) {
 }
 
 /** 1200×630 card, rendered once into /og.png (Browser Rendering screenshot). */
-export function ogCardPage() {
+export function ogCardPage(host = "drop.example.com") {
   return `${head("og card")}
 body{width:1200px;height:630px;overflow:hidden}
 .card{position:relative;width:1200px;height:630px;padding:64px 88px;display:flex;flex-direction:column;justify-content:space-between}
@@ -408,14 +415,14 @@ body{width:1200px;height:630px;overflow:hidden}
 </style></head><body><div class="card">
 <div style="display:flex;align-items:center;gap:12px">${bloom({ size: 34, id: "og-bloom" })}<span style="font:600 28px/1 var(--display);letter-spacing:-.02em">drop<span style="color:var(--bloom)">.</span></span></div>
 <h1>Every file gets five characters<em>.</em></h1>
-<div><span class="u">drop.shiftbloom.studio/<b>aB3dE</b></span></div>
+<div><span class="u">${esc(host)}/<b>aB3dE</b></span></div>
 </div></body></html>`;
 }
 
 export function llmsTxt(origin: string) {
   return `# drop
 
-> drop is a small, self-hostable file host, pastebin and URL shortener by shiftbloom studio, running on Cloudflare Workers (R2, D1, KV, Queues, Workers AI). Licensed AGPL-3.0-or-later.
+> drop is a small, self-hostable file host, pastebin and URL shortener${BRAND.operator ? `, run here by ${BRAND.operator.name}` : ""}. It runs on Cloudflare Workers or as a Node.js server. Licensed AGPL-3.0-or-later.
 
 - Purpose: share screenshots, files, text snippets and long URLs as short links; built for ShareX, works with curl.
 - Limits: uploads need the owner's API token (this is not a public anonymous upload service); viewing is public for anyone with a link; items can expire (10m to 1y or never); multipart uploads up to 95 MB, raw PUT up to 500 MB.
@@ -432,9 +439,8 @@ export function llmsTxt(origin: string) {
 
 ## Links
 
-- Source and self-hosting guide: ${SOURCE_URL}
-- Studio: https://shiftbloom.studio
-`;
+- Source and self-hosting guide: ${sourceUrl()}
+${BRAND.operator?.url ? `- Operator: ${BRAND.operator.url}\n` : ""}`;
 }
 
 // ---------- imprint and privacy policy (English and German) ----------
