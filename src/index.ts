@@ -6,7 +6,7 @@
 import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, deletePage, legalPage, configureUi, requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "./ui.js";
 import { CLAIM_WINDOW, KEEP_REQUESTS, MAX_PENDING, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile, type RequestRow } from "./requests";
 import { sniff, blockReason, effectiveType, INLINE_TYPES, stripJpegLocation, stripPngLocation, inspectZip } from "./safety";
-import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName, robotsTxt } from "./util";
+import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName, robotsTxt, ownerFilter, canManage, MASTER_OWNER, type Principal } from "./util";
 
 export interface Env {
   FILES: R2Bucket;
@@ -57,6 +57,8 @@ export interface Item {
   /** Why the file is on hold (quarantine), or null. */
   blocked?: string | null;
   sha256?: string | null;
+  /** 'master' or the api_tokens.id that uploaded it; null for items from before owners were recorded. */
+  owner?: string | null;
 }
 type Job = { type: "analyze" | "scan"; id: string };
 const IMAGE_TYPES = /^image\/(jpeg|png|gif|webp|avif|bmp)$/;
@@ -95,11 +97,12 @@ async function newId(env: Env) {
   throw new Error("could not allocate id");
 }
 
-async function saveItem(env: Env, it: Item) {
+async function saveItem(env: Env, it: Item, p: Principal) {
+  it.owner = p.owner;
   await env.DB.prepare(
-    `INSERT INTO items (id, kind, r2_key, name, mime, size, target, lang, created_at, expires_at, delete_token, thumb_key, alt, nsfw, views, blocked)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)`
-  ).bind(it.id, it.kind, it.r2_key, it.name, it.mime, it.size, it.target, it.lang, it.created_at, it.expires_at, it.delete_token, it.thumb_key, it.alt, it.nsfw, it.blocked ?? null).run();
+    `INSERT INTO items (id, kind, r2_key, name, mime, size, target, lang, created_at, expires_at, delete_token, thumb_key, alt, nsfw, views, blocked, owner)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`
+  ).bind(it.id, it.kind, it.r2_key, it.name, it.mime, it.size, it.target, it.lang, it.created_at, it.expires_at, it.delete_token, it.thumb_key, it.alt, it.nsfw, it.blocked ?? null, it.owner).run();
   await cacheItem(env, it);
 }
 
@@ -142,7 +145,7 @@ const BLOCK_MSG: Record<string, (n: string) => string> = {
   malware: () => `A virus scan flagged this file, so it wasn\u2019t uploaded.`,
 };
 
-async function handleUpload(req: Request, env: Env, ctx: ExecutionContext) {
+async function handleUpload(req: Request, env: Env, ctx: ExecutionContext, p: Principal) {
   const url = new URL(req.url);
   const ct = req.headers.get("content-type") || "";
   let expiresRaw = req.headers.get("x-expires") || url.searchParams.get("expires");
@@ -205,12 +208,12 @@ async function handleUpload(req: Request, env: Env, ctx: ExecutionContext) {
     it.mime = effectiveType(declared, sniffed, first);
   }
   if (scan === "2") it.blocked = "scan failed";
-  await saveItem(env, it);
+  await saveItem(env, it, p);
   ctx.waitUntil(env.JOBS.send({ type: "scan", id }));
   return json(links(req, it), 201);
 }
 
-async function handlePaste(req: Request, env: Env) {
+async function handlePaste(req: Request, env: Env, p: Principal) {
   const ct = req.headers.get("content-type") || "";
   let content = "", lang = "", title = "", expires: string | null = new URL(req.url).searchParams.get("expires") || req.headers.get("x-expires");
   if (ct.includes("application/json")) {
@@ -236,11 +239,11 @@ async function handlePaste(req: Request, env: Env) {
   const name = sanitizeName(title || `${id}.${lang || "txt"}`);
   Object.assign(it, { r2_key: `p/${id}.txt`, name, mime: "text/plain; charset=utf-8", size: new TextEncoder().encode(content).length, lang: lang.replace(/[^a-z0-9+#-]/gi, "").slice(0, 20) || null });
   await env.FILES.put(it.r2_key!, content, { httpMetadata: { contentType: "text/plain; charset=utf-8" } });
-  await saveItem(env, it);
+  await saveItem(env, it, p);
   return json(links(req, it), 201);
 }
 
-async function handleShorten(req: Request, env: Env) {
+async function handleShorten(req: Request, env: Env, p: Principal) {
   const ct = req.headers.get("content-type") || "";
   const u = new URL(req.url);
   let target = u.searchParams.get("url") || "", expires = u.searchParams.get("expires") || req.headers.get("x-expires");
@@ -257,7 +260,7 @@ async function handleShorten(req: Request, env: Env) {
   const id = await newId(env);
   const it = baseItem(id, "link", expires_at);
   it.target = parsed.toString();
-  await saveItem(env, it);
+  await saveItem(env, it, p);
   return json(links(req, it), 201);
 }
 
@@ -275,16 +278,18 @@ function sharexConfig(req: Request, token: string, type: string) {
   });
 }
 
-async function handleList(req: Request, env: Env) {
+async function handleList(req: Request, env: Env, p: Principal) {
   const u = new URL(req.url);
   const limit = Math.min(Number(u.searchParams.get("limit") || 50), 200);
   const offset = Math.max(0, Math.floor(Number(u.searchParams.get("offset")) || 0));
   const kind = u.searchParams.get("kind");
+  // every token sees only its own history; the links themselves stay public
+  const own = ownerFilter(p);
   const stmt = kind
-    ? env.DB.prepare("SELECT * FROM items WHERE kind = ? ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(kind, limit, offset)
-    : env.DB.prepare("SELECT * FROM items ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(limit, offset);
+    ? env.DB.prepare(`SELECT * FROM items WHERE ${own.sql} AND kind = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(...own.args, kind, limit, offset)
+    : env.DB.prepare(`SELECT * FROM items WHERE ${own.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(...own.args, limit, offset);
   const { results } = await stmt.all<Item>();
-  const stats = await env.DB.prepare("SELECT kind, COUNT(*) n, COALESCE(SUM(size),0) bytes FROM items GROUP BY kind").all();
+  const stats = await env.DB.prepare(`SELECT kind, COUNT(*) n, COALESCE(SUM(size),0) bytes FROM items WHERE ${own.sql} GROUP BY kind`).bind(...own.args).all();
   return json({ items: results.map((it) => ({ ...links(req, it), name: it.name, mime: it.mime, size: it.size, alt: it.alt, nsfw: it.nsfw, views: it.views, blocked: it.blocked ?? null, created_at: new Date(it.created_at * 1000).toISOString() })), stats: stats.results });
 }
 
@@ -543,12 +548,12 @@ async function cleanup(env: Env) {
 
 // ---------- router ----------
 /**
- * Returns the token the request is authorised with, or null.
+ * Returns who the request is authorised as, or null.
  * Accepts the API_TOKEN secret (master token) and named tokens from the api_tokens table,
  * as long as they are not revoked and not expired.
  */
-async function authenticate(req: Request, env: Env, ctx: ExecutionContext): Promise<string | null> {
-  if (isAuthed(req, env.API_TOKEN)) return env.API_TOKEN;
+async function authenticate(req: Request, env: Env, ctx: ExecutionContext): Promise<Principal | null> {
+  if (isAuthed(req, env.API_TOKEN)) return { token: env.API_TOKEN!, owner: MASTER_OWNER, master: true };
   const token = requestToken(req);
   if (!isNamedToken(token)) return null;
   const hash = await sha256Hex(token);
@@ -559,7 +564,7 @@ async function authenticate(req: Request, env: Env, ctx: ExecutionContext): Prom
   const now = Math.floor(Date.now() / 1000);
   if (!row || !tokenUsable(row, now)) return null;
   if (!row.last_used_at || now - row.last_used_at >= 60) ctx.waitUntil(env.DB.prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?").bind(now, row.id).run());
-  return token;
+  return { token, owner: row.id, master: false };
 }
 
 async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -600,21 +605,22 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   }
 
   if (path.startsWith("/api/")) {
-    const token = await authenticate(req, env, ctx);
-    if (!token) {
+    const who = await authenticate(req, env, ctx);
+    if (!who) {
       // slow down token guessing: a handful of failed attempts per IP and minute, then 429
       if (env.AUTH_RL && !(await env.AUTH_RL.limit({ key: ip(req) })).success) return err(429, "too many attempts, wait a minute");
       return err(401, "unauthorized: send Authorization: Bearer <token>");
     }
-    if (path === "/api/upload" && (m === "POST" || m === "PUT")) return handleUpload(req, env, ctx);
-    if (path === "/api/paste" && m === "POST") return handlePaste(req, env);
-    if (path === "/api/shorten" && m === "POST") return handleShorten(req, env);
-    if (path === "/api/list" && m === "GET") return handleList(req, env);
-    if (path === "/api/sharex" && m === "GET") return sharexConfig(req, token, url.searchParams.get("type") || "upload");
+    if (path === "/api/upload" && (m === "POST" || m === "PUT")) return handleUpload(req, env, ctx, who);
+    if (path === "/api/paste" && m === "POST") return handlePaste(req, env, who);
+    if (path === "/api/shorten" && m === "POST") return handleShorten(req, env, who);
+    if (path === "/api/list" && m === "GET") return handleList(req, env, who);
+    if (path === "/api/sharex" && m === "GET") return sharexConfig(req, who.token, url.searchParams.get("type") || "upload");
     const im = /^\/api\/items\/([A-Za-z0-9]+)$/.exec(path);
     if (im) {
       const it = await env.DB.prepare("SELECT * FROM items WHERE id = ?").bind(im[1]).first<Item>();
-      if (!it) return err(404, "not found");
+      // another token's item looks exactly like a missing one
+      if (!it || !canManage(who, it.owner)) return err(404, "not found");
       if (m === "DELETE") { await deleteItem(env, it); return json({ deleted: it.id }); }
       if (m === "GET") return json({ ...it, ...links(req, it) });
       if (m === "POST" && url.searchParams.get("reanalyze") !== null) { await env.JOBS.send({ type: "scan", id: it.id }); return json({ queued: it.id }); }
@@ -674,7 +680,12 @@ export default {
       // everything user-generated (views, raw files, thumbs, short links, API, 404) stays out of search engines
       const r = new Response(res.body, res);
       r.headers.set("x-robots-tag", "noindex, nofollow, noimageindex");
-      if (path.startsWith("/api/")) for (const [k, v] of Object.entries(corsHeaders())) r.headers.set(k, v);
+      if (path.startsWith("/api/")) {
+        for (const [k, v] of Object.entries(corsHeaders())) r.headers.set(k, v);
+        // API answers depend on the token: never store them in a shared cache
+        if (!r.headers.has("cache-control")) r.headers.set("cache-control", "private, no-store");
+        r.headers.set("vary", "authorization");
+      }
       return r;
     } catch (e) {
       console.error("unhandled", String(e), (e as Error)?.stack);

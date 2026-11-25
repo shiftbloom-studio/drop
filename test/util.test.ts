@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, parseExpiry, randomString, sanitizeName, timingSafeEqual, ID_ALPHABET } from "../src/util";
+import { extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, parseExpiry, randomString, sanitizeName, timingSafeEqual, ID_ALPHABET, ownerFilter, canManage } from "../src/util";
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -81,5 +81,22 @@ describe("named tokens", () => {
     expect(tokenUsable({ expires_at: t, revoked_at: null }, t)).toBe(false);
     expect(tokenUsable({ expires_at: null, revoked_at: t - 5 }, t)).toBe(false);
     expect(tokenUsable(null, t)).toBe(false);
+  });
+});
+
+describe("history is private per token", () => {
+  const master = { owner: "master", master: true };
+  const named = { owner: "abc123", master: false };
+  it("a named token sees only its own items", () => {
+    expect(ownerFilter(named)).toEqual({ sql: "owner = ?", args: ["abc123"] });
+  });
+  it("the master token sees its own and items from before owners were recorded", () => {
+    expect(ownerFilter(master)).toEqual({ sql: "(owner = ? OR owner IS NULL)", args: ["master"] });
+  });
+  it("only the owner (or the master token) can manage an item", () => {
+    expect(canManage(named, "abc123")).toBe(true);
+    expect(canManage(named, "other")).toBe(false);
+    expect(canManage(named, null)).toBe(false);
+    expect(canManage(master, "other")).toBe(true);
   });
 });

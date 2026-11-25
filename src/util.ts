@@ -84,3 +84,19 @@ export const robotsTxt = (origin: string) =>
     `Sitemap: ${origin}/sitemap.xml`,
     "",
   ].join("\n");
+
+/** Who a request acts as: the master token (API_TOKEN) or one named token. */
+export type Principal = { token: string; owner: string; master: boolean };
+export const MASTER_OWNER = "master";
+
+/**
+ * SQL condition that limits items to what this principal may see in its history.
+ * A named token sees only its own uploads; the master token sees its own and those from before owners
+ * were recorded. Direct links (/v, /r, /s) stay public either way.
+ */
+export function ownerFilter(p: Pick<Principal, "owner" | "master">): { sql: string; args: string[] } {
+  return p.master ? { sql: "(owner = ? OR owner IS NULL)", args: [p.owner] } : { sql: "owner = ?", args: [p.owner] };
+}
+
+/** May this principal manage (view details, delete, re-scan, release) the item? The master token may manage all. */
+export const canManage = (p: Pick<Principal, "owner" | "master">, itemOwner: string | null | undefined) => p.master || (!!itemOwner && itemOwner === p.owner);
