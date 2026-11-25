@@ -1,7 +1,7 @@
 /** Self-hosted asset proxy: visitors only ever talk to drop's own origin (no third-party font/CDN requests). */
 import { faviconSvg, llmsTxt, ogCardPage } from "./html";
 
-const FONT_CSS = "https://api.fontshare.com/v2/css?f[]=clash-display@500,600&f[]=general-sans@400,500,600&display=swap";
+const FONT_CSS = "https://api.fontshare.com/v2/css?f[]=clash-display@400,500,600&f[]=general-sans@400,500,600&display=swap";
 const MONO = (w: number) => `https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5/files/jetbrains-mono-latin-${w}-normal.woff2`;
 const HLJS = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js";
 const ALLOWED = /^https:\/\/(cdn\.fontshare\.com\/wf\/[A-Za-z0-9_\-/]+\.(woff2|woff|ttf)|cdn\.jsdelivr\.net\/npm\/@fontsource\/jetbrains-mono@5\/files\/[a-z0-9\-]+\.woff2)$/;

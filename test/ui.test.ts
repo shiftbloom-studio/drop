@@ -9,10 +9,11 @@ const item = (over: Partial<Item> = {}): Item => ({
 const links = { url: "https://drop.test/aB3dE", raw: "https://drop.test/aB3dE/raw.png", thumbnail: null };
 
 describe("bloom mark", () => {
-  it("draws 34 petals and a seed from the construction spec", () => {
+  it("draws the shiftbloom.studio bloom: 34 petals and a seed", () => {
     const svg = bloom({ size: 64, id: "t" });
     expect(svg.match(/<path /g)).toHaveLength(10 + 10 + 8 + 6);
-    expect(svg).toContain('<circle r="7" fill="#FF2E52"/>');
+    expect(svg).toContain('viewBox="0 0 200 200"');
+    expect(svg).toContain('<circle cx="100" cy="100" r="7" fill="#FF2E52"/>');
     expect(svg.match(/<linearGradient/g)).toHaveLength(4);
   });
   it("uses the solid variant for the favicon", () => {
