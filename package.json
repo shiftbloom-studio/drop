@@ -1,0 +1,21 @@
+{
+  "name": "drop",
+  "version": "0.1.0",
+  "description": "ShareX-compatible file host, pastebin and URL shortener on Cloudflare Workers",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc -p .",
+    "db:migrate": "wrangler d1 migrations apply drop-db --remote",
+    "build": "esbuild src/index.ts --bundle --format=esm --minify --target=es2022 --outfile=dist/worker.js"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261125.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.168.0"
+  },
+  "private": true,
+  "type": "module",
+  "license": "MIT"
+}

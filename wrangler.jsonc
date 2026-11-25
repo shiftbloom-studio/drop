@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "drop",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [{ "pattern": "drop.shiftbloom.studio", "custom_domain": true }],
+  "observability": { "enabled": true },
+  "vars": { "MAX_MULTIPART_MB": "95", "MAX_STREAM_MB": "500" },
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "drop-files" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "drop-db", "database_id": "<your-d1-database-id>", "migrations_dir": "migrations" }],
+  "kv_namespaces": [{ "binding": "LINKS", "id": "<your-kv-namespace-id>" }],
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "drop-jobs" }],
+    "consumers": [{ "queue": "drop-jobs", "max_batch_size": 5, "max_retries": 3 }]
+  },
+  "ai": { "binding": "AI" },
+  "images": { "binding": "IMAGES" },
+  "triggers": { "crons": ["17 * * * *"] }
+  // secret: API_TOKEN (wrangler secret put API_TOKEN)
+}
