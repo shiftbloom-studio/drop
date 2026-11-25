@@ -13,7 +13,13 @@ const fmtSize = (n: number) => {
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
 };
-const fmtDate = (s: number) => new Date(s * 1000).toISOString().slice(0, 16).replace("T", " ") + " utc";
+const fmtDate = (s: number) => new Date(s * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+/** UTC in the markup, rewritten to the visitor's local time by VIEW_JS. */
+const fmtTime = (s: number) => `<time datetime="${new Date(s * 1000).toISOString()}">${fmtDate(s)}</time>`;
+const extOfName = (n: string) => (/\.([A-Za-z0-9]{1,8})$/.exec(n)?.[1] || "").toLowerCase();
+const VIEW_JS = `document.querySelectorAll('time[datetime]').forEach(function(t){t.textContent=new Date(t.getAttribute('datetime')).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})});
+var c=document.getElementById('cplink');if(c)c.onclick=function(){navigator.clipboard.writeText(c.dataset.u).then(function(){c.textContent='Copied';setTimeout(function(){c.textContent='Copy link'},1600)},function(){})};
+var v=document.getElementById('unveil');if(v)v.onclick=function(){document.getElementById('v').classList.remove('veil');v.remove()};`;
 
 // ---------- the Bloom, drawn from the construction spec ----------
 // rings: [radius, petals, rotation offset, width factor, gradient stem -> tip]
@@ -60,42 +66,41 @@ const css = `
 :root{--bloom:#FF2E52;--root:#C81040;--petal:#FF8FAB;--blush:#FFE9EF;--ink:#1A1216;--ink60:rgba(26,18,22,.6);--ink40:rgba(26,18,22,.42);--line:rgba(26,18,22,.12);--paper:#fff;--warm:#FAF6F4;
 --display:"Clash Display",ui-sans-serif,system-ui,sans-serif;--sans:"General Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
 --ease:cubic-bezier(.22,1.1,.36,1);--settle:cubic-bezier(.4,0,.2,1)}
-*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+*{box-sizing:border-box}[hidden]{display:none!important}html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.65 var(--sans);-webkit-font-smoothing:antialiased}
 ::selection{background:var(--blush)}
 a{color:var(--root);text-decoration:none;background:linear-gradient(var(--root),var(--root)) 0 100%/0 1px no-repeat;transition:background-size .24s var(--ease)}
 a:hover{background-size:100% 1px}
 .wrap{max-width:1040px;margin:0 auto;padding:0 clamp(20px,5vw,48px)}
-.label{font:500 11px/1.4 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink40)}
+.label{font:500 12px/1.4 var(--mono);letter-spacing:.04em;color:var(--ink60)}
 .label.red{color:var(--root)}
 .mono{font-family:var(--mono)}
 .top{display:flex;align-items:center;justify-content:space-between;padding:22px 0;border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:10px;color:var(--ink);background:none}
 .brand .word{font:600 22px/1 var(--display);letter-spacing:-.02em}
 .brand .word i{font-style:normal;color:var(--bloom)}
-.brand .by{font:400 15px/1 var(--display);color:var(--ink60);letter-spacing:-.01em}
-.brand .by i{font-style:normal;color:var(--bloom)}
 h1,h2{font-family:var(--display);font-weight:600;letter-spacing:-.025em;line-height:1.02;margin:0}
 h1{font-size:clamp(40px,6.4vw,72px)}h1 em{font-style:normal;color:var(--bloom)}
 h2{font-size:24px;line-height:1.1}
-.btn{appearance:none;border:0;border-radius:999px;background:var(--bloom);color:#fff;font:500 12px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;padding:14px 22px;cursor:pointer;transition:background .24s var(--settle),transform .24s var(--ease);display:inline-flex;align-items:center;gap:8px;text-decoration:none}
+.btn{appearance:none;border:0;border-radius:999px;background:var(--bloom);color:#fff;font:600 15px/1 var(--sans);padding:13px 20px;cursor:pointer;transition:background .24s var(--settle),transform .24s var(--ease);display:inline-flex;align-items:center;gap:8px;text-decoration:none}
 .btn:hover{background:var(--root);background-size:auto}.btn:active{transform:scale(.97)}
 .btn.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
 .btn.ghost:hover{background:var(--ink);color:#fff}
-.btn.sm{padding:9px 14px;font-size:11px}
+.btn.sm{padding:9px 14px;font-size:13px}
+.btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 input,textarea,select{font:15px/1.5 var(--sans);color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 14px;width:100%;transition:border-color .24s var(--settle),box-shadow .24s var(--settle)}
 input:focus,textarea:focus,select:focus{outline:0;border-color:var(--bloom);box-shadow:0 0 0 3px var(--blush)}
 textarea{min-height:200px;font:13px/1.6 var(--mono);resize:vertical}
 .panel{background:var(--warm);border-radius:20px;padding:clamp(18px,3vw,32px)}
 .seedlist{list-style:none;padding:0;margin:0}.seedlist li{position:relative;padding-left:18px}.seedlist li:before{content:"";position:absolute;left:2px;top:.68em;width:7px;height:7px;border-radius:50%;background:var(--bloom)}
-.foot{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:22px 0 30px;margin-top:72px;border-top:1px solid var(--line)}
+.foot{display:flex;justify-content:space-between;gap:12px 24px;flex-wrap:wrap;padding:22px 0 30px;margin-top:72px;border-top:1px solid var(--line)}.foot .sb{color:var(--ink);background:none;font-weight:600}.foot .sb i{font-style:normal;color:var(--bloom)}.foot p{margin:0;font-size:14px;color:var(--ink60)}
 .unfold{animation:unfold .6s var(--ease) both}
 @keyframes unfold{from{opacity:0;transform:scale(.6)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 `;
 
-const head = (title: string, extra = "") => `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title><meta name="robots" content="noindex"><meta name="theme-color" content="#ffffff">
+const head = (title: string, extra = "", index = false) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)}</title>${index ? "" : `<meta name="robots" content="noindex">`}<meta name="theme-color" content="#ffffff">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/fonts.css">${extra}<style>${css}`;
 
 const topbar = (right = "") => `<header class="top"><a class="brand" href="/" aria-label="drop — shiftbloom studio">${bloom({ size: 28, solid: true })}<span class="word">drop<i>.</i></span></a>${right}</header>`;
@@ -103,100 +108,207 @@ const topbar = (right = "") => `<header class="top"><a class="brand" href="/" ar
 /** AGPL §13: users interacting over a network must be offered the source. Forks: point this at your repo. */
 export const SOURCE_URL = "https://github.com/shiftbloom-studio/drop";
 
-const footer = (host: string) => `<footer class="foot"><span class="label">${esc(host)} · files · pastes · links · <a class="label" href="${SOURCE_URL}" style="background:none">source (agpl-3.0)</a></span><a class="label" href="https://shiftbloom.studio" style="background:none">shiftbloom studio<span style="color:var(--bloom)">.</span> · hamburg</a></footer>`;
+const footer = () => `<footer class="foot"><p>drop is open source under AGPL-3.0. <a href="${SOURCE_URL}">Read the code</a></p><p><a class="sb" href="https://shiftbloom.studio">shiftbloom studio<i>.</i></a> · hamburg</p></footer>`;
 
 // ---------- landing ----------
-export function landingPage(host: string) {
-  return `${head(host)}
-.hero{display:grid;grid-template-columns:1.25fr 1fr;align-items:center;gap:24px;padding:clamp(40px,8vw,96px) 0 clamp(32px,6vw,72px);position:relative}
-.hero p{font-size:18px;color:var(--ink60);max-width:30em;margin:22px 0 0}
-.flower{display:flex;justify-content:center}
-.flower .bloom{width:min(340px,70vw);height:auto;animation:unfold .6s var(--ease) both,breathe 6s ease-in-out .6s infinite}
-.flower .ring{transform-origin:0 0}.flower .r0{animation:spin 240s linear infinite}.flower .r2{animation:spin 180s linear infinite reverse}
-@keyframes breathe{50%{transform:scale(1.02)}}@keyframes spin{to{transform:rotate(360deg)}}
-.sprinkle{position:absolute;pointer-events:none}
+const SITE_TITLE = "drop. · shiftbloom studio";
+const SITE_DESC = "The file host behind shiftbloom studio’s screenshot links. It runs on a single Cloudflare Worker, and the code is on GitHub.";
+
+function landingMeta(origin: string) {
+  const ld = {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    name: "drop",
+    url: `${origin}/`,
+    description: SITE_DESC,
+    applicationCategory: "UtilitiesApplication",
+    operatingSystem: "Web, Windows (ShareX)",
+    inLanguage: "en",
+    isAccessibleForFree: true,
+    license: "https://www.gnu.org/licenses/agpl-3.0.html",
+    offers: { "@type": "Offer", price: "0", priceCurrency: "EUR" },
+    publisher: { "@id": "https://shiftbloom.studio/#org" },
+    sameAs: [SOURCE_URL],
+  };
+  return `<meta name="description" content="${esc(SITE_DESC)}"><link rel="canonical" href="${esc(origin)}/">
+<meta property="og:type" content="website"><meta property="og:site_name" content="shiftbloom studio"><meta property="og:locale" content="en_US">
+<meta property="og:title" content="${esc(SITE_TITLE)}"><meta property="og:description" content="${esc(SITE_DESC)}"><meta property="og:url" content="${esc(origin)}/">
+<meta property="og:image" content="${esc(origin)}/og.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="drop. Every file gets five characters.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${esc(origin)}/og.png">
+<script type="application/ld+json">${JSON.stringify(ld).replace(/</g, "\\u003c")}</script>`;
+}
+
+export type Limits = { multiMb: number; maxMb: number };
+
+export function landingPage(host: string, lim: Limits = { multiMb: 95, maxMb: 500 }) {
+  // the token check runs before first paint, so visitors never see the tool flash
+  const early = `<script>try{if(localStorage.getItem('drop_token'))document.documentElement.classList.add('authed')}catch(e){}</script>`;
+  return `${head(SITE_TITLE, `${early}${landingMeta(`https://${host}`)}`, true)}
+html.authed .anon,html:not(.authed) .member{display:none!important}
+html:not(.want) #tokf{display:none}
+.hero{display:grid;grid-template-columns:1.35fr 1fr;align-items:end;gap:32px;padding:clamp(32px,6vw,64px) 0 clamp(24px,4vw,40px)}
+.hero h1{font-size:clamp(34px,4.8vw,56px);line-height:1.04;max-width:14em}
+.hero p{font-size:17px;color:var(--ink60);max-width:32em;margin:18px 0 0}
+.demo{background:var(--warm);border-radius:18px;padding:22px 22px 18px}
+.demo .u{font:500 clamp(15px,1.75vw,22px)/1.3 var(--mono);white-space:nowrap;color:var(--ink)}
+.demo .u b{font-weight:600;color:var(--root)}
+.demo .cap{font-size:13px;color:var(--ink60);margin:8px 0 0}
+.who{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink60)}
+html.authed .who:before{content:"";width:7px;height:7px;border-radius:50%;background:#2E9E62}.who .sb{color:var(--ink);background:none;font-weight:600}.who .sb i{font-style:normal;color:var(--bloom)}
+.gate{display:grid;gap:16px;max-width:40em}
+.gate p{margin:0;font-size:17px}
+#tokf{display:grid;gap:8px;margin-top:6px}
+#tokf .row input{flex:1 1 240px;font:14px/1.5 var(--mono)}
+.hint{font-size:14px;color:var(--ink60);margin:0}.hint.err{color:var(--root)}
 .tool{display:grid;gap:18px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1 1 240px}
-.tabs{display:inline-flex;gap:4px;background:#fff;border-radius:999px;padding:4px;box-shadow:inset 0 0 0 1px var(--line)}
-.tabs button{appearance:none;border:0;background:transparent;border-radius:999px;padding:9px 16px;font:500 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink60);cursor:pointer;transition:all .24s var(--settle)}
-.tabs button.on{background:var(--ink);color:#fff}
-#drop{position:relative;border:1.5px dashed rgba(26,18,22,.25);border-radius:18px;background:#fff;padding:clamp(36px,6vw,64px) 20px;text-align:center;cursor:pointer;transition:all .24s var(--settle)}
-#drop:hover,#drop.over{border-color:var(--bloom);background:var(--blush)}
-#drop strong{display:block;font:600 24px/1.1 var(--display);letter-spacing:-.02em;margin:14px 0 6px}
-#drop .bloom{transition:transform .6s var(--ease)}#drop.over .bloom{transform:scale(1.15) rotate(18deg)}
 .opts{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-.opts select{width:auto;padding:8px 34px 8px 12px;border-radius:999px;font:500 12px/1 var(--mono)}
-#out{display:grid;gap:8px}
-.res{display:flex;align-items:center;gap:12px;background:#fff;border-radius:14px;padding:10px 10px 10px 16px;box-shadow:inset 0 0 0 1px var(--line);animation:unfold .24s var(--ease) both}
-.res a{font:500 14px/1.3 var(--mono);flex:1;word-break:break-all}.res.err{color:var(--root);font:13px var(--mono)}.res.wait{color:var(--ink40);font:13px var(--mono)}
-.auth{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.auth input{flex:1 1 220px;font-family:var(--mono);font-size:13px}
-.sx{display:flex;gap:16px;flex-wrap:wrap}
-.list{margin-top:56px}.list h2{margin-bottom:6px}
-table{width:100%;border-collapse:collapse;margin-top:18px}
+.tabs{display:inline-flex;gap:4px;background:#fff;border-radius:999px;padding:4px;box-shadow:inset 0 0 0 1px var(--line)}
+.tabs button{appearance:none;border:0;background:transparent;border-radius:999px;padding:9px 18px;font:500 14px/1 var(--sans);color:var(--ink60);cursor:pointer;transition:background .24s var(--settle),color .24s var(--settle)}
+.tabs button[aria-selected=true]{background:var(--ink);color:#fff}
+.tabs button:focus-visible{outline:2px solid var(--bloom);outline-offset:2px}
+.exp{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--ink60)}
+.exp select{width:auto;padding:8px 34px 8px 12px;border-radius:999px;font:500 14px/1 var(--sans)}
+#drop{border:1.5px dashed rgba(26,18,22,.28);border-radius:18px;background:#fff;padding:clamp(32px,5vw,52px) 20px;text-align:center;cursor:pointer;transition:border-color .24s var(--settle),background .24s var(--settle)}
+#drop:hover,#drop.over,#drop:focus-visible{border-color:var(--bloom);background:var(--blush);outline:0}
+#drop strong{display:block;font:600 24px/1.1 var(--display);letter-spacing:-.02em;margin:0 0 8px}
+#drop .sub{font-size:14px;color:var(--ink60)}
+.touch{display:none}@media (pointer:coarse){.touch{display:inline}.desk{display:none}}
+#out{display:grid;gap:8px}#out:empty{display:none}
+.res{position:relative;overflow:hidden;display:flex;align-items:center;gap:12px;background:#fff;border-radius:14px;padding:10px 10px 10px 16px;min-height:52px;box-shadow:inset 0 0 0 1px var(--line);animation:unfold .24s var(--ease) both}
+.res a{font:500 14px/1.3 var(--mono);flex:1;word-break:break-all}
+.res .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.res .pct{font:12px/1 var(--mono);color:var(--ink60);white-space:nowrap}
+.res .bar{position:absolute;left:0;bottom:0;height:3px;width:0;background:var(--bloom);transition:width .2s var(--settle)}
+.res.err{color:var(--root);font-size:14px}
+.sx{display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:14px;color:var(--ink60)}
+.lnk{appearance:none;border:0;background:none;padding:0;font:inherit;color:var(--root);cursor:pointer}
+.lnk:hover{text-decoration:underline;text-underline-offset:3px}
+.list{margin-top:56px}
+.list .row{justify-content:space-between}
+.list select{width:auto;padding:7px 32px 7px 12px;border-radius:999px;font:500 14px/1 var(--sans)}
+table{width:100%;border-collapse:collapse;margin-top:14px}
+th{text-align:left;font:500 11px/1.4 var(--mono);letter-spacing:.06em;color:var(--ink60);padding:8px;border-bottom:1px solid var(--line)}
 td{padding:12px 8px;border-top:1px solid var(--line);vertical-align:middle;font-size:14px}
-td.t{width:60px}td.t img,td.t span{width:48px;height:48px;border-radius:10px;object-fit:cover;display:grid;place-items:center;background:var(--warm);font:500 10px var(--mono);color:var(--ink40);letter-spacing:.1em;text-transform:uppercase}
-td .alt{color:var(--ink60);font-size:13px;margin-top:2px}
-td.m{font:12px/1.5 var(--mono);color:var(--ink40);white-space:nowrap;text-align:right}
-.tag{display:inline-block;background:var(--blush);color:var(--root);font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;padding:4px 7px;border-radius:6px;margin-left:6px;vertical-align:2px}
-.x{appearance:none;border:0;background:none;color:var(--ink40);cursor:pointer;font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;padding:6px}.x:hover{color:var(--root)}
-.pop{position:fixed;pointer-events:none;z-index:9;animation:pop .6s var(--ease) forwards}
-@keyframes pop{0%{opacity:0;transform:translate(0,0) scale(.4)}40%{opacity:1}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(1)}}
-@media (max-width:760px){.sprinkle{display:none}.hero{grid-template-columns:1fr}.flower{order:-1}.flower .bloom{width:200px}td.m{display:none}}
+tr:first-child td{border-top:0}
+td.t{width:60px}td.t img,td.t span{width:48px;height:48px;border-radius:10px;object-fit:cover;display:grid;place-items:center;background:var(--warm);font:500 10px var(--mono);color:var(--ink60)}
+td.n{overflow-wrap:anywhere}td .alt{color:var(--ink60);font-size:13px;margin-top:2px}
+td.m,.mm{font:12px/1.5 var(--mono);color:var(--ink60)}
+td.m{white-space:nowrap;text-align:right}.mm{display:none;margin-top:4px}
+td.undo{color:var(--ink60);padding:18px 8px}
+.tag{display:inline-block;background:var(--blush);color:var(--root);font:500 11px/1 var(--mono);padding:4px 7px;border-radius:6px;margin-left:6px;vertical-align:2px}
+.x{appearance:none;border:0;background:none;color:var(--ink60);cursor:pointer;font:500 13px var(--sans);padding:6px}.x:hover{color:var(--root)}
+.more{display:flex;justify-content:center;margin-top:18px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (max-width:760px){.hero{grid-template-columns:1fr;align-items:start}td.m,th.m{display:none}.mm{display:block}}
 </style></head><body>
 <div class="wrap">
-${topbar(`<span class="label">by shiftbloom studio<span style="color:var(--bloom)">.</span></span>`)}
+${topbar(`<div class="who"><span class="member">connected</span><span class="member" aria-hidden="true">·</span><button class="lnk member" id="logout" type="button">sign out</button><a class="sb anon" href="https://shiftbloom.studio">shiftbloom studio<i>.</i></a></div>`)}
 <section class="hero">
-  <div><span class="label red">files · pastes · short links</span><h1 style="margin-top:14px">Datei rein,<br><em>Link</em> raus.</h1>
-  <p>Screenshots, Videos, Code-Schnipsel und lange URLs, auf kurze Links unter ${esc(host)} gebracht. ShareX-ready, mit Ablaufdatum, wenn du willst.</p></div>
-  <div class="flower">${bloom({ size: 340, id: "hero", anim: true })}</div>
-  <span class="sprinkle" style="right:2%;top:14%">${SPARK(18)}</span><span class="sprinkle" style="left:46%;top:10%">${CROSS(11)}</span><span class="sprinkle" style="right:44%;bottom:12%"><svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#FF2E52"/></svg></span>
+  <div><span class="label member" id="stats"></span>
+  <h1 style="margin-top:14px">Every file gets five characters<em>.</em></h1>
+  <p>Drop a file here and the link is in your clipboard before you’ve switched windows. Text and long URLs work the same way. If something shouldn’t stick around, give it an expiry date.</p></div>
+  <div class="demo"><div class="u">${esc(host)}/<b>aB3dE</b></div></div>
 </section>
 
-<section class="panel tool">
-  <div class="auth" id="auth"><span class="label" style="flex:0 0 auto">token</span><input id="tok" type="password" placeholder="API-Token einfügen" autocomplete="current-password"><button class="btn ghost sm" id="save">speichern</button></div>
-  <div class="opts"><div class="tabs" role="tablist"><button class="on" data-t="up">datei</button><button data-t="paste">paste</button><button data-t="link">link</button></div>
-  <label class="row" style="gap:8px"><span class="label">läuft ab</span><select id="exp"><option value="never">nie</option><option value="10m">10 min</option><option value="1h">1 h</option><option value="1d">1 tag</option><option value="7d">7 tage</option><option value="30d">30 tage</option><option value="1y">1 jahr</option></select></label></div>
-  <section data-p="up"><div id="drop" tabindex="0">${bloom({ size: 48, id: "dz" })}<strong>Hier fallen lassen.</strong><span class="label">klicken · ziehen · strg+v</span><input type="file" id="file" multiple hidden></div></section>
-  <section data-p="paste" hidden><textarea id="ptext" placeholder="Text oder Code …" spellcheck="false"></textarea><div class="row" style="margin-top:10px"><input id="plang" placeholder="sprache, z. b. ts, py, json" style="width:240px;font-family:var(--mono);font-size:13px"><button class="btn" id="psend">paste erstellen</button></div></section>
-  <section data-p="link" hidden><div class="row"><input class="grow" id="lurl" placeholder="https://…" style="font-family:var(--mono);font-size:14px"><button class="btn" id="lsend">kürzen</button></div></section>
-  <div id="out"></div>
-  <div class="sx"><span class="label">sharex</span><a href="#" class="label red" data-sx="upload">upload-config</a><a href="#" class="label red" data-sx="paste">paste-config</a><a href="#" class="label red" data-sx="shorten">shortener-config</a></div>
+<section class="panel gate anon" aria-labelledby="gate-h">
+  <h2 id="gate-h">This one’s private.</h2><p>Uploading here needs a token, and the token is ours. The code is open though, so you can run your own drop on your Cloudflare account.</p>
+  <div class="row"><a class="btn" href="${SOURCE_URL}#self-hosting">Set up your own</a><button class="lnk" id="have" type="button" aria-controls="tokf" aria-expanded="false">I have a token</button></div>
+  <form id="tokf" autocomplete="on"><label class="label" for="tok">token</label>
+  <div class="row"><input id="tok" name="password" type="password" autocomplete="current-password" placeholder="Paste your API token" required><button class="btn" type="submit">Remember</button></div>
+  <p class="hint err" id="tokerr" role="alert"></p></form>
 </section>
 
-<section class="list" id="recent" hidden><div class="row" style="justify-content:space-between"><h2>Zuletzt gewachsen.</h2><button class="btn ghost sm" id="reload">aktualisieren</button></div><div id="stats" class="label" style="margin-top:8px"></div><table id="list"></table></section>
-${footer(host)}
+<section class="panel tool member" aria-label="Upload">
+  <div class="opts"><div class="tabs" role="tablist" aria-label="What are you sharing?"><button role="tab" id="t-up" aria-controls="p-up" aria-selected="true" type="button">File</button><button role="tab" id="t-paste" aria-controls="p-paste" aria-selected="false" tabindex="-1" type="button">Text</button><button role="tab" id="t-link" aria-controls="p-link" aria-selected="false" tabindex="-1" type="button">Link</button></div>
+  <label class="exp">delete after <select id="exp"><option value="never">never</option><option value="10m">10 minutes</option><option value="1h">1 hour</option><option value="1d">1 day</option><option value="7d">7 days</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="1y">1 year</option></select></label></div>
+  <div role="tabpanel" id="p-up" aria-labelledby="t-up"><div id="drop" role="button" tabindex="0" aria-label="Drop files here, or press Enter to pick them, up to ${lim.maxMb} MB"><strong>Drop files here</strong><span class="sub"><span class="desk">or press ctrl+v</span><span class="touch">or tap to pick</span> · up to ${lim.maxMb} mb</span><input type="file" id="file" multiple hidden></div></div>
+  <form role="tabpanel" id="p-paste" aria-labelledby="t-paste" hidden><label class="sr" for="ptext">Text or code</label><textarea id="ptext" placeholder="Paste text or code" spellcheck="false"></textarea><div class="row" style="margin-top:10px"><label class="sr" for="plang">Language for highlighting</label><input id="plang" placeholder="language, e.g. ts or json" style="width:240px;font-family:var(--mono);font-size:13px"><button class="btn" type="submit">Save as paste</button></div></form>
+  <form role="tabpanel" id="p-link" aria-labelledby="t-link" hidden><div class="row"><label class="sr" for="lurl">Long URL</label><input class="grow" id="lurl" placeholder="https://" inputmode="url" style="font-family:var(--mono);font-size:14px"><button class="btn" type="submit">Shorten</button></div></form>
+  <div id="out" aria-live="polite"></div><p class="sr" id="live" aria-live="assertive"></p>
+  <div class="sx"><span class="label">sharex configs</span><a href="#" data-sx="upload">uploads</a><a href="#" data-sx="paste">text</a><a href="#" data-sx="shorten">short links</a></div>
+</section>
+
+<section class="list member" id="recent" aria-labelledby="recent-h"><div class="row"><h2 id="recent-h">Recent uploads</h2><label class="exp"><span class="sr">Show</span><button class="btn ghost sm" id="reload" type="button">Refresh</button><select id="kind"><option value="">all</option><option value="file">files</option><option value="paste">pastes</option><option value="link">links</option></select></label></div>
+<table id="list"><thead><tr><th scope="col"><span class="sr">Preview</span></th><th scope="col">Name</th><th scope="col" class="m" style="text-align:right">Details</th><th scope="col"><span class="sr">Action</span></th></tr></thead><tbody></tbody></table>
+<p class="hint" id="empty" hidden style="margin-top:14px">Nothing here yet.</p>
+<div class="more"><button class="btn ghost sm" id="more" type="button" hidden>Load more</button></div></section>
+${footer()}
 </div>
 <script>
-const $=s=>document.querySelector(s);const T=()=>localStorage.getItem('drop_token')||'';
-const auth=()=>{$('#tok').value=T()?'••••••••••••':'';};auth();
-$('#save').onclick=()=>{const v=$('#tok').value.trim();if(v&&!v.startsWith('•'))localStorage.setItem('drop_token',v);else if(!v)localStorage.removeItem('drop_token');auth();load()};
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));document.querySelectorAll('section[data-p]').forEach(s=>s.hidden=s.dataset.p!==b.dataset.t)});
-const H=()=>({authorization:'Bearer '+T(),'x-expires':$('#exp').value});
-const SP='${SPARK(14).replace(/'/g, "\\'")}';
-function scatter(el){const r=el.getBoundingClientRect();for(let i=0;i<5;i++){const s=document.createElement('span');s.className='pop';s.innerHTML=SP;const a=(i/5)*Math.PI*2+Math.random()*.6;s.style.left=(r.left+r.width/2)+'px';s.style.top=(r.top+r.height/2)+'px';s.style.setProperty('--dx',Math.cos(a)*90+'px');s.style.setProperty('--dy',Math.sin(a)*60+'px');s.style.animationDelay=(i*40)+'ms';document.body.append(s);setTimeout(()=>s.remove(),900)}}
-function note(t,c){const d=document.createElement('div');d.className='res '+c;d.textContent=t;$('#out').prepend(d);return d}
-function show(r,w){w&&w.remove();if(!r||r.error){note(r&&r.error==='unauthorized: send Authorization: Bearer <token>'?'Token fehlt oder ist falsch.':(r&&r.error)||'Fehler','err');return}
-const d=document.createElement('div');d.className='res';d.innerHTML='<a target=_blank rel=noopener></a><button class="btn sm">kopieren</button>';const a=d.querySelector('a');a.href=r.url;a.textContent=r.url.replace(/^https?:\\/\\//,'');
-const b=d.querySelector('button');b.onclick=()=>{navigator.clipboard.writeText(r.url);b.textContent='kopiert';setTimeout(()=>b.textContent='kopieren',1400)};$('#out').prepend(d);navigator.clipboard?.writeText(r.url).catch(()=>{});scatter(d);load()}
-async function j(r){try{return await r.json()}catch{return{error:'HTTP '+r.status}}}
-async function up(files){for(const f of files){const w=note('lädt '+f.name+' …','wait');const big=f.size>90*1024*1024;
-const r=await fetch(big?'/api/upload?filename='+encodeURIComponent(f.name):'/api/upload',{method:big?'PUT':'POST',headers:big?{...H(),'content-type':f.type||'application/octet-stream'}:H(),body:big?f:(()=>{const fd=new FormData();fd.append('file',f);return fd})()});show(await j(r),w)}}
-const dz=$('#drop');dz.onclick=()=>$('#file').click();dz.onkeydown=e=>{if(e.key==='Enter'||e.key===' ')$('#file').click()};$('#file').onchange=e=>up(e.target.files);
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],R=document.documentElement;
+const LIM={multi:${lim.multiMb},max:${lim.maxMb}},MiB=1048576,PAGE=30;
+let tok='';try{tok=localStorage.getItem('drop_token')||''}catch(e){}
+const A=()=>({authorization:'Bearer '+tok});
+const say=t=>{const l=$('#live');l.textContent='';setTimeout(()=>l.textContent=t,40)};
+const num=(n,d)=>n.toLocaleString('en-GB',{maximumFractionDigits:d});
+const fs=n=>{const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<3){n/=1024;i++}return num(n,i?1:0)+' '+u[i]};
+const when=s=>new Date(s).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+const BAD='That token doesn’t work. Check API_TOKEN in your Worker secrets.';
+function why(st,b){if(st===401)return BAD;if(st===413&&/paste/.test((b&&b.error)||''))return'That’s more than 10 MB of text. Upload it as a file instead.';return'Something went wrong ('+(st||'offline')+'). Try again in a moment.'}
+
+// token
+function setMode(on){R.classList.toggle('authed',on);if(on){R.classList.remove('want');load()}}
+async function check(t){try{return(await fetch('/api/list?limit=1',{headers:{authorization:'Bearer '+t}})).status}catch(e){return 0}}
+$('#have').onclick=()=>{R.classList.add('want');$('#have').setAttribute('aria-expanded','true');$('#tok').focus()};
+$('#tokf').onsubmit=async e=>{e.preventDefault();const v=$('#tok').value.trim(),er=$('#tokerr');if(!v)return;er.textContent='';const st=await check(v);
+if(st===200){tok=v;try{localStorage.setItem('drop_token',v)}catch(x){}$('#tok').value='';setMode(true);say('connected');return}
+er.textContent=why(st)};
+$('#logout').onclick=()=>{try{localStorage.removeItem('drop_token')}catch(e){}tok='';setMode(false);};
+
+// tabs
+const tabs=$$('[role=tab]');
+function sel(b){tabs.forEach(x=>{const on=x===b;x.setAttribute('aria-selected',on);x.tabIndex=on?0:-1;document.getElementById(x.getAttribute('aria-controls')).hidden=!on})}
+tabs.forEach((b,i)=>{b.onclick=()=>sel(b);b.onkeydown=e=>{let n=-1;if(e.key==='ArrowRight')n=(i+1)%tabs.length;else if(e.key==='ArrowLeft')n=(i+tabs.length-1)%tabs.length;else if(e.key==='Home')n=0;else if(e.key==='End')n=tabs.length-1;if(n<0)return;e.preventDefault();sel(tabs[n]);tabs[n].focus()}});
+
+// results
+function row(c){const d=document.createElement('div');d.className='res '+(c||'');$('#out').prepend(d);return d}
+function fail(d,t){d.className='res err';d.replaceChildren(t);say(t)}
+async function copy(u,b,auto){try{await navigator.clipboard.writeText(u);b.textContent='Copied';say('Copied');setTimeout(()=>b.textContent='Copy',1600)}catch(e){if(!auto)say('Something went wrong (clipboard). Try again in a moment.')}}
+function done(d,r){d.className='res';d.replaceChildren();const a=document.createElement('a');a.href=r.url;a.target='_blank';a.rel='noopener';a.textContent=r.url.replace(/^https?:\\/\\//,'');
+const b=document.createElement('button');b.className='btn sm';b.type='button';b.textContent='Copy';b.onclick=()=>copy(r.url,b);d.append(a,b);copy(r.url,b,true);say(a.textContent);load()}
+
+// uploads with progress and cancel
+const hdr=x=>{x.setRequestHeader('authorization','Bearer '+tok);x.setRequestHeader('x-expires',$('#exp').value)};
+function one(f){const d=row('');if(f.size>LIM.max*MiB)return fail(d,f.name+' is '+fs(f.size)+'. The limit is '+LIM.max+' MB.');if(!f.size)return fail(d,f.name+' is empty.');
+const x=new XMLHttpRequest(),bar=document.createElement('i'),nm=document.createElement('span'),pc=document.createElement('span'),c=document.createElement('button');
+bar.className='bar';nm.className='nm';nm.textContent='Uploading '+f.name+' …';pc.className='pct';pc.textContent='0 %';c.type='button';c.className='x';c.textContent='cancel';c.onclick=()=>x.abort();d.append(bar,nm,pc,c);
+x.upload.onprogress=e=>{if(!e.lengthComputable)return;const p=e.loaded/e.total;bar.style.width=(p*100)+'%';pc.textContent=Math.floor(p*100)+' % · '+fs(e.loaded)+' of '+fs(e.total)};
+x.onload=()=>{let b=null;try{b=JSON.parse(x.responseText)}catch(e){}if(x.status>=200&&x.status<300&&b&&b.url)done(d,b);else fail(d,x.status===413?f.name+' is '+fs(f.size)+'. The limit is '+LIM.max+' MB.':why(x.status,b))};
+x.onerror=()=>fail(d,why(0));x.onabort=()=>d.remove();
+if(f.size>LIM.multi*MiB){x.open('PUT','/api/upload?filename='+encodeURIComponent(f.name));hdr(x);x.setRequestHeader('content-type',f.type||'application/octet-stream');x.send(f)}
+else{x.open('POST','/api/upload');hdr(x);const fd=new FormData();fd.append('file',f);x.send(fd)}}
+const up=fl=>{for(const f of fl)one(f)};
+const dz=$('#drop');dz.onclick=()=>$('#file').click();dz.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('#file').click()}};$('#file').onchange=e=>{up(e.target.files);e.target.value=''};
 dz.ondragover=e=>{e.preventDefault();dz.classList.add('over')};dz.ondragleave=()=>dz.classList.remove('over');dz.ondrop=e=>{e.preventDefault();dz.classList.remove('over');up(e.dataTransfer.files)};
-addEventListener('paste',e=>{if(/TEXTAREA|INPUT/.test(e.target.tagName))return;const f=[...e.clipboardData.files];if(f.length)up(f)});
-$('#psend').onclick=async()=>{const r=await fetch('/api/paste',{method:'POST',headers:{...H(),'content-type':'application/json'},body:JSON.stringify({content:$('#ptext').value,lang:$('#plang').value})});show(await j(r))};
-$('#lsend').onclick=async()=>{const r=await fetch('/api/shorten',{method:'POST',headers:{...H(),'content-type':'application/json'},body:JSON.stringify({url:$('#lurl').value})});show(await j(r))};
-document.querySelectorAll('[data-sx]').forEach(a=>a.onclick=async e=>{e.preventDefault();const r=await fetch('/api/sharex?type='+a.dataset.sx,{headers:{authorization:'Bearer '+T()}});if(!r.ok)return note('Token fehlt oder ist falsch.','err');const u=URL.createObjectURL(await r.blob());Object.assign(document.createElement('a'),{href:u,download:location.host+'-'+a.dataset.sx+'.sxcu'}).click()});
-const fs=n=>{const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<3){n/=1024;i++}return n.toFixed(i?1:0)+' '+u[i]};
+addEventListener('paste',e=>{if(!R.classList.contains('authed')||/TEXTAREA|INPUT/.test(e.target.tagName))return;const f=[...e.clipboardData.files];if(f.length)up(f)});
+
+// pastes and links
+const URLBAD='That doesn’t look like a link. It needs to start with http:// or https://.';
+async function api(path,body){const d=row('');d.textContent='saving …';try{const r=await fetch(path,{method:'POST',headers:{...A(),'x-expires':$('#exp').value,'content-type':'application/json'},body:JSON.stringify(body)});let b=null;try{b=await r.json()}catch(e){}
+if(r.ok&&b&&b.url){done(d,b);return true}fail(d,path==='/api/shorten'&&r.status===400?URLBAD:why(r.status,b))}catch(e){fail(d,why(0))}return false}
+$('#p-paste').onsubmit=async e=>{e.preventDefault();const t=$('#ptext').value;if(!t.trim())return fail(row(''),'There’s nothing to save yet.');if(await api('/api/paste',{content:t,lang:$('#plang').value.trim()}))$('#ptext').value=''};
+$('#p-link').onsubmit=async e=>{e.preventDefault();let u=$('#lurl').value.trim();if(!u)return fail(row(''),URLBAD);if(!/^[a-z][a-z0-9+.-]*:/i.test(u))u='https://'+u;
+if(!/^https?:\\/\\/[^\\s/]+\\.[^\\s]+/i.test(u))return fail(row(''),URLBAD);if(await api('/api/shorten',{url:u}))$('#lurl').value=''};
+$$('[data-sx]').forEach(a=>a.onclick=async e=>{e.preventDefault();let r;try{r=await fetch('/api/sharex?type='+a.dataset.sx,{headers:A()})}catch(x){return fail(row(''),why(0))}if(!r.ok)return fail(row(''),r.status===401?'Save your token first. The ShareX configs include it.':why(r.status));const u=URL.createObjectURL(await r.blob());Object.assign(document.createElement('a'),{href:u,download:location.host+'-'+a.dataset.sx+'.sxcu'}).click()});
+
+// recent items
+let off=0;
+function stats(s){let n=0,b=0,l=0;for(const x of s){if(x.kind==='link')l+=x.n;else{n+=x.n;b+=x.bytes}}$('#stats').textContent=n+' '+(n===1?'file':'files')+' · '+fs(b).toLowerCase()}
 const td=(c,t)=>{const e=document.createElement('td');if(c)e.className=c;if(t!=null)e.textContent=t;return e};
-async function load(){if(!T()){$('#recent').hidden=true;return}const r=await fetch('/api/list?limit=30',{headers:{authorization:'Bearer '+T()}});if(!r.ok){$('#recent').hidden=true;return}const d=await r.json();$('#recent').hidden=false;
-const k={file:'dateien',paste:'pastes',link:'links'};$('#stats').textContent=d.stats.map(s=>s.n+' '+(k[s.kind]||s.kind)+(s.kind==='link'?'':' · '+fs(s.bytes))).join('  ·  ');const t=$('#list');t.replaceChildren();
-for(const it of d.items){const tr=document.createElement('tr');const c0=td('t');if(it.thumbnail){const i=document.createElement('img');i.src=it.thumbnail;i.loading='lazy';i.alt=it.alt||'';c0.append(i)}else{const s=document.createElement('span');s.textContent=it.kind==='paste'?'txt':it.kind==='link'?'url':(it.name||'').split('.').pop().slice(0,4);c0.append(s)}
-const c1=td();const a=document.createElement('a');a.href=it.url;a.target='_blank';a.textContent=it.kind==='link'?it.raw:(it.name||it.id);c1.append(a);if(it.nsfw){const g=document.createElement('span');g.className='tag';g.textContent='nsfw';c1.append(g)}if(it.alt){const p=document.createElement('div');p.className='alt';p.textContent=it.alt;c1.append(p)}
-const c2=td('m',[it.id,it.kind==='link'?null:fs(it.size),it.views+' aufrufe',it.expires_at?'bis '+it.expires_at.slice(0,10):null].filter(Boolean).join(' · '));
-const c3=td('');const x=document.createElement('button');x.className='x';x.textContent='löschen';x.onclick=async()=>{if(!confirm('Wirklich löschen?'))return;await fetch('/api/items/'+it.id,{method:'DELETE',headers:{authorization:'Bearer '+T()}});load()};c3.append(x);tr.append(c0,c1,c2,c3);t.append(tr)}}
-$('#reload').onclick=load;load();
+async function del(tr,it){if(!confirm('Delete '+(it.name||it.id)+'? Its link stops working right away.'))return;tr.remove();try{await fetch('/api/items/'+it.id,{method:'DELETE',headers:A()})}catch(e){}refresh()}
+function item(it){const tr=document.createElement('tr'),c0=td('t');if(it.thumbnail){const i=document.createElement('img');i.src=it.thumbnail;i.loading='lazy';i.alt='';c0.append(i)}else{const s=document.createElement('span');s.textContent=it.kind==='paste'?'txt':it.kind==='link'?'url':(it.name||'').split('.').pop().slice(0,4);c0.append(s)}
+const c1=td('n'),a=document.createElement('a');a.href=it.url;a.target='_blank';a.rel='noopener';a.textContent=it.kind==='link'?it.raw:(it.name||it.id);c1.append(a);if(it.nsfw){const g=document.createElement('span');g.className='tag';g.textContent='sensitive';c1.append(g)}
+if(it.alt){const p=document.createElement('div');p.className='alt';p.textContent=it.alt;c1.append(p)}
+const meta=[it.id,it.kind==='link'?null:fs(it.size),it.views+(it.views===1?' view':' views'),it.expires_at?'expires '+when(it.expires_at):null].filter(Boolean).join(' · ');
+const mm=document.createElement('div');mm.className='mm';mm.textContent=meta;c1.append(mm);
+const c3=td(''),x=document.createElement('button');x.className='x';x.type='button';x.textContent='Delete';x.setAttribute('aria-label','Delete '+(it.name||it.id));x.onclick=()=>del(tr,it);c3.append(x);tr.append(c0,c1,td('m',meta),c3);return tr}
+async function load(more){if(!tok)return;if(!more)off=0;const k=$('#kind').value;let r;try{r=await fetch('/api/list?limit='+PAGE+'&offset='+off+(k?'&kind='+k:''),{headers:A()})}catch(e){return}
+if(r.status===401){R.classList.remove('authed');R.classList.add('want');$('#tokerr').textContent=BAD;return}if(!r.ok)return;const d=await r.json();
+stats(d.stats);const tb=$('#list tbody');if(!more)tb.replaceChildren();for(const it of d.items)tb.append(item(it));off+=d.items.length;$('#more').hidden=d.items.length<PAGE;$('#empty').hidden=tb.children.length>0}
+async function refresh(){try{const r=await fetch('/api/list?limit=1',{headers:A()});if(r.ok)stats((await r.json()).stats)}catch(e){}}
+$('#kind').onchange=()=>load();$('#reload').onclick=()=>load();$('#more').onclick=()=>load(true);
+if(tok)load();
 </script></body></html>`;
 }
 
@@ -208,29 +320,30 @@ export function viewPage(it: Item, l: { url: string; raw: string | null; thumbna
   const isVid = mime.startsWith("video/");
   const isAud = mime.startsWith("audio/");
   const isPdf = mime === "application/pdf";
-  const desc = it.alt || (it.kind === "paste" ? (pasteText || "").slice(0, 160) : `${fmtSize(it.size)} · ${mime}`);
+  const firstLine = (pasteText || "").split("\n").map((x) => x.trim()).find(Boolean) || "";
+  const desc = it.kind === "paste" ? firstLine.slice(0, 200) || "Empty paste" : it.alt || `${fmtSize(it.size)} · ${mime}`;
   let og = `<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${esc(l.url)}"><meta property="og:site_name" content="drop · shiftbloom studio"><meta name="theme-color" content="#FF2E52">`;
-  if (isImg && !it.nsfw) og += `<meta property="og:image" content="${esc(l.raw)}"><meta property="og:image:alt" content="${esc(it.alt || title)}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${esc(l.raw)}">`;
-  if (isVid && !it.nsfw) og += `<meta property="og:type" content="video.other"><meta property="og:video" content="${esc(l.raw)}"><meta property="og:video:type" content="${esc(mime)}">`;
+  if (isImg && !it.nsfw) og += `<meta property="og:image" content="${esc(l.raw)}">${it.width && it.height ? `<meta property="og:image:width" content="${it.width}"><meta property="og:image:height" content="${it.height}">` : ""}<meta property="og:image:type" content="${esc(mime)}"><meta property="og:image:alt" content="${esc(it.alt || title)}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${esc(l.raw)}">`;
+  if (isVid && !it.nsfw) og += `<meta property="og:type" content="video.other"><meta property="og:video" content="${esc(l.raw)}"><meta property="og:video:type" content="${esc(mime)}"><meta property="og:video:secure_url" content="${esc(l.raw)}">${it.width && it.height ? `<meta property="og:video:width" content="${it.width}"><meta property="og:video:height" content="${it.height}">` : ""}<meta name="twitter:card" content="player">`;
 
   let body: string;
   let extraHead = "";
   if (it.kind === "paste") {
     extraHead = `<script src="/assets/hljs.js" defer></script>`;
     const lines = (pasteText || "").split("\n").length;
-    body = `<div class="code"><div class="codebar"><span class="label" style="color:rgba(244,237,238,.5)">${esc(it.lang || "text")} · ${lines} zeilen · ${fmtSize(it.size)}</span><button class="btn sm" id="cp">kopieren</button></div><pre><code class="${it.lang ? `language-${esc(it.lang)}` : "nohighlight"}">${esc(pasteText)}</code></pre></div>
-<script>document.getElementById('cp').onclick=function(){navigator.clipboard.writeText(document.querySelector('pre code').innerText);this.textContent='kopiert'};addEventListener('DOMContentLoaded',function(){window.hljs&&hljs.highlightAll()})</script>`;
+    body = `<div class="code"><div class="codebar"><span class="label" style="color:rgba(244,237,238,.5)">${esc(it.lang || "text")} · ${lines} lines · ${fmtSize(it.size)}</span><button class="btn sm" id="cp" type="button">Copy</button></div><pre><code class="${it.lang ? `language-${esc(it.lang)}` : "nohighlight"}">${esc(pasteText)}</code></pre></div>
+<script>document.getElementById('cp').onclick=function(){navigator.clipboard.writeText(document.querySelector('pre code').innerText);var b=this;b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1600)};addEventListener('DOMContentLoaded',function(){window.hljs&&hljs.highlightAll()})</script>`;
   } else if (isImg) {
     const img = `<img src="${esc(l.raw)}" alt="${esc(it.alt || title)}">`;
     body = it.nsfw
-      ? `<div class="stage veil" id="v">${img}<button class="btn" onclick="document.getElementById('v').classList.remove('veil');this.remove()">sensibel? trotzdem zeigen</button></div>`
+      ? `<div class="stage veil" id="v">${img}<button class="btn" id="unveil" type="button">Might be sensitive. Show it</button></div>`
       : `<div class="stage">${img}</div>`;
   } else if (isVid) body = `<div class="stage"><video src="${esc(l.raw)}" controls playsinline preload="metadata"></video></div>`;
-  else if (isAud) body = `<div class="stage pad">${bloom({ size: 96, id: "au" })}<audio src="${esc(l.raw)}" controls></audio></div>`;
+  else if (isAud) body = `<div class="stage pad"><div class="ext">${esc(extOfName(title) || "audio")}</div><audio src="${esc(l.raw)}" controls></audio></div>`;
   else if (isPdf) body = `<div class="stage"><object data="${esc(l.raw)}" type="application/pdf" style="width:100%;height:80vh"></object></div>`;
-  else body = `<div class="stage pad">${bloom({ size: 96, id: "fi" })}<div class="fname">${esc(title)}</div><span class="label">${fmtSize(it.size)} · ${esc(mime)}</span></div>`;
+  else body = `<div class="stage pad"><div class="ext">${esc(extOfName(title) || "file")}</div><div class="fname">${esc(title)}</div><span class="label">${fmtSize(it.size)} · ${esc(mime)}</span></div>`;
 
-  return `${head(title, `${og}${extraHead}`)}
+  return `${head(`${title} · drop.`, `${og}${extraHead}`)}
 main{padding:clamp(28px,5vw,56px) 0 0}
 .titlebar{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:22px}
 .titlebar h1{font-size:clamp(26px,4vw,40px);word-break:break-all}
@@ -241,7 +354,7 @@ main{padding:clamp(28px,5vw,56px) 0 0}
 .veil img{filter:blur(32px) saturate(.6);transform:scale(1.08)}.veil .btn{position:absolute}
 .meta{display:flex;gap:10px 22px;flex-wrap:wrap;align-items:center;margin-top:18px}
 .alt{margin-top:14px;color:var(--ink60);max-width:46em}
-.alt:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--bloom);margin-right:10px;vertical-align:1px}
+.ext{font:600 15px/1 var(--mono);color:var(--root);background:var(--blush);border-radius:12px;padding:16px 18px;text-transform:lowercase}
 .code{background:var(--ink);border-radius:20px;overflow:hidden;animation:unfold .6s var(--ease) both}
 .codebar{display:flex;justify-content:space-between;align-items:center;padding:12px 12px 12px 20px;border-bottom:1px solid rgba(244,237,238,.1)}
 pre{margin:0;overflow:auto;max-height:78vh}pre code{display:block;padding:20px;font:13px/1.65 var(--mono);color:#F4EDEE;tab-size:2}
@@ -250,24 +363,63 @@ pre{margin:0;overflow:auto;max-height:78vh}pre code{display:block;padding:20px;f
 .hljs-title,.hljs-section,.hljs-name,.hljs-function .hljs-title{color:#fff;font-weight:500}.hljs-type,.hljs-class .hljs-title,.hljs-variable,.hljs-params{color:#FFDCE7}
 .hljs-tag,.hljs-meta,.hljs-punctuation{color:rgba(244,237,238,.6)}.hljs-addition{color:#FFDCE7;background:rgba(255,46,82,.12)}.hljs-deletion{color:#FF8FAB;background:rgba(255,46,82,.22)}
 </style></head><body><div class="wrap">
-${topbar(`<a class="btn ghost sm" href="/">neuer drop</a>`)}
+${topbar(`<a class="btn ghost sm" href="/">New upload</a>`)}
 <main>
-<div class="titlebar"><div><span class="label red">${it.kind === "paste" ? "paste" : esc(mime.split("/")[0] || "datei")}</span><h1 style="margin-top:8px">${esc(title)}</h1></div>
-<div class="row" style="display:flex;gap:10px"><a class="btn" href="${esc(l.raw)}">${it.kind === "paste" ? "raw" : "original"}</a><a class="btn ghost" href="/${esc(it.id)}/dl">download</a></div></div>
+<div class="titlebar"><div><span class="label red">${it.kind === "paste" ? "paste" : isImg ? "image" : isVid ? "video" : isAud ? "audio" : "file"}</span><h1 style="margin-top:8px">${esc(title)}</h1></div>
+<div class="row" style="display:flex;gap:10px"><button class="btn" id="cplink" type="button" data-u="${esc(l.url)}">Copy link</button><a class="btn ghost" href="${esc(l.raw)}">${it.kind === "paste" ? "Raw" : "Original"}</a><a class="btn ghost" href="/${esc(it.id)}/dl">Download</a></div></div>
 ${body}
-<div class="meta"><span class="label">${esc(it.id)}</span><span class="label">${it.kind === "paste" ? "paste" : fmtSize(it.size)}</span><span class="label">${fmtDate(it.created_at)}</span>${it.expires_at ? `<span class="label red">läuft ab ${fmtDate(it.expires_at)}</span>` : ""}</div>
+<div class="meta"><span class="label">${esc(it.id)}</span><span class="label">${it.kind === "paste" ? "paste" : fmtSize(it.size)}</span><span class="label">${fmtTime(it.created_at)}</span>${it.expires_at ? `<span class="label red">expires ${fmtTime(it.expires_at)}</span>` : ""}</div>
 ${it.alt ? `<p class="alt">${esc(it.alt)}</p>` : ""}
 </main>
-${footer(new URL(l.url).host)}
-</div></body></html>`;
+${footer()}
+</div><script>${VIEW_JS}</script></body></html>`;
 }
 
 export function notFoundPage() {
-  return `${head("404 · drop")}
-.nf{min-height:70vh;display:grid;place-items:center;text-align:center}
-.nf .seed{width:14px;height:14px;border-radius:50%;background:var(--bloom);margin:0 auto 28px;animation:unfold .24s var(--ease) both}
-.nf p{color:var(--ink60);margin:14px 0 28px}
+  return `${head("Not found · drop.")}
+.nf{min-height:66vh;display:grid;place-items:center;text-align:center}
+.nf p{color:var(--ink60);margin:14px 0 28px;font-size:17px}
 </style></head><body><div class="wrap">${topbar()}
-<div class="nf"><div><div class="seed"></div><span class="label red">404</span><h1 style="margin-top:12px">Hier ist nichts<br>gewachsen<em>.</em></h1><p>Der Link ist abgelaufen, gelöscht oder hat nie existiert.</p><a class="btn" href="/">zur startseite</a></div></div>
+<div class="nf"><div><span class="label">404</span><h1 style="margin-top:12px;font-size:clamp(32px,4.6vw,52px)">This link is gone<em>.</em></h1><p>It may have expired, or there’s a typo in it.</p><a class="btn" href="/">Back to drop</a></div></div>
+${footer()}
 </div></body></html>`;
+}
+
+/** 1200×630 card, rendered once into /og.png (Browser Rendering screenshot). */
+export function ogCardPage() {
+  return `${head("og card")}
+body{width:1200px;height:630px;overflow:hidden}
+.card{position:relative;width:1200px;height:630px;padding:64px 88px;display:flex;flex-direction:column;justify-content:space-between}
+.card h1{font-size:76px;line-height:1.02;max-width:15em}
+.card .u{display:inline-block;background:var(--warm);border-radius:18px;padding:20px 26px;font:500 30px/1 var(--mono)}.card .u b{color:var(--root);font-weight:600}
+</style></head><body><div class="card">
+<div style="display:flex;align-items:center;gap:12px">${bloom({ size: 34, solid: true })}<span style="font:600 28px/1 var(--display);letter-spacing:-.02em">drop<span style="color:var(--bloom)">.</span></span></div>
+<h1>Every file gets five characters<em>.</em></h1>
+<div><span class="u">drop.shiftbloom.studio/<b>aB3dE</b></span></div>
+</div></body></html>`;
+}
+
+export function llmsTxt(origin: string) {
+  return `# drop
+
+> drop is a small, self-hostable file host, pastebin and URL shortener by shiftbloom studio, running on Cloudflare Workers (R2, D1, KV, Queues, Workers AI). Licensed AGPL-3.0-or-later.
+
+- Purpose: share screenshots, files, text snippets and long URLs as short links; built for ShareX, works with curl.
+- Limits: uploads need the owner's API token (this is not a public anonymous upload service); viewing is public for anyone with a link; items can expire (10m to 1y or never); multipart uploads up to 95 MB, raw PUT up to 500 MB.
+- Uploaded items are not meant to be indexed and send X-Robots-Tag: noindex.
+
+## API (Authorization: Bearer <token>)
+
+- POST ${origin}/api/upload — multipart field "file" (ShareX image/file uploader); optional "expires"
+- PUT ${origin}/api/upload?filename=name.ext — raw body for large files
+- POST ${origin}/api/paste — "content", optional "lang", "expires" (ShareX text uploader)
+- POST ${origin}/api/shorten — "url" (ShareX URL shortener)
+- GET ${origin}/api/sharex?type=upload|paste|shorten — ready-made .sxcu config
+- Responses: JSON with url, raw, thumbnail, delete, expires_at
+
+## Links
+
+- Source and self-hosting guide: ${SOURCE_URL}
+- Studio: https://shiftbloom.studio
+`;
 }

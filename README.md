@@ -1,17 +1,19 @@
 # drop.
 
-**A tiny, self-hostable file host, pastebin and URL shortener on Cloudflare Workers.** ShareX-compatible, with expiring links, thumbnails and AI alt text.
+drop is where shiftbloom studio's screenshots go before they get sent anywhere. It's one Cloudflare Worker. Files land in R2 and you get back a five-character link on your own domain. Text pastes and short URLs use the same kind of link, and ShareX can upload to it directly.
 
-Runs at [drop.shiftbloom.studio](https://drop.shiftbloom.studio). Made by [shiftbloom studio](https://shiftbloom.studio). Licensed under AGPL-3.0-or-later.
+It runs at [drop.shiftbloom.studio](https://drop.shiftbloom.studio) and is made by [shiftbloom studio](https://shiftbloom.studio). The code is licensed under AGPL-3.0-or-later.
 
-- **Uploads**: images, video and any file, stored in R2. Each upload gets a view page, a raw link, a download link, range requests for video seeking, and OpenGraph/Discord embeds.
-- **Pastes**: syntax highlighting and a raw view.
-- **Short links**: 302 redirects.
-- **Expiry** per item (`10m`, `1h`, `1d`, `7d`, `30d`, `90d`, `1y`, `never` or a custom value like `12h`/`3d`/`2w`). An hourly cron removes expired items.
-- **Thumbnails** through the Images binding, and **alt text plus an NSFW flag** through Workers AI. Both run in the background through a Queue.
-- **Deletion URLs** per item, so the ShareX "Deletion URL" works out of the box.
-- **Web UI** with drag & drop, Ctrl+V paste, pastes, shortening and a list of recent items.
-- **Privacy**: fonts and highlight.js are proxied through the worker, so visitors never contact third-party CDNs. `robots.txt` and `noindex` keep items out of search engines.
+## What it does
+
+- Every upload gets a page, a raw link and a download link. Videos support seeking, and links unfurl in Discord and Slack.
+- Pastes get syntax highlighting and a raw view.
+- Short links are plain 302 redirects.
+- Every item can expire: `10m`, `1h`, `1d`, `7d`, `30d`, `90d`, `1y`, `never`, or a custom value like `12h` or `2w`. An hourly cron cleans up.
+- A queue job makes a 480px WebP thumbnail with the Images binding and asks Workers AI for alt text and an NSFW flag.
+- Each upload comes with its own deletion URL, which ShareX picks up on its own.
+- The web UI takes drag and drop or Ctrl+V, shows upload progress, and lists recent items with a short undo window on delete.
+- Fonts and highlight.js are proxied through the Worker, so visitors never talk to third-party CDNs. The homepage may be indexed. Uploads, pastes, raw files and short links send `X-Robots-Tag: noindex`.
 
 Uploading and every `/api/*` route need the API token. Viewing an item is public for anyone who has its link.
 

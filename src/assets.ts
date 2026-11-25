@@ -1,5 +1,5 @@
 /** Self-hosted asset proxy: visitors only ever talk to drop's own origin (no third-party font/CDN requests). */
-import { faviconSvg } from "./html";
+import { faviconSvg, llmsTxt, ogCardPage } from "./html";
 
 const FONT_CSS = "https://api.fontshare.com/v2/css?f[]=clash-display@500,600&f[]=general-sans@400,500,600&display=swap";
 const MONO = (w: number) => `https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5/files/jetbrains-mono-latin-${w}-normal.woff2`;
@@ -24,6 +24,10 @@ export async function handleAsset(req: Request, ctx: ExecutionContext): Promise<
   const p = url.pathname;
   if (p === "/favicon.svg" || p === "/favicon.ico")
     return new Response(faviconSvg(), { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=604800" } });
+  if (p === "/llms.txt")
+    return new Response(llmsTxt(url.origin), { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } });
+  if (p === "/og-card")
+    return new Response(ogCardPage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
   if (p === "/assets/fonts.css")
     return cached(req, ctx, async () => {
       let cssText = "";

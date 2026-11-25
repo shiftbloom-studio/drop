@@ -36,6 +36,8 @@ export interface Item {
   alt: string | null;
   nsfw: number | null;
   views: number;
+  width?: number | null;
+  height?: number | null;
 }
 type Job = { type: "analyze"; id: string };
 
@@ -225,10 +227,11 @@ function sharexConfig(req: Request, env: Env, type: string) {
 async function handleList(req: Request, env: Env) {
   const u = new URL(req.url);
   const limit = Math.min(Number(u.searchParams.get("limit") || 50), 200);
+  const offset = Math.max(0, Math.floor(Number(u.searchParams.get("offset")) || 0));
   const kind = u.searchParams.get("kind");
   const stmt = kind
-    ? env.DB.prepare("SELECT * FROM items WHERE kind = ? ORDER BY created_at DESC LIMIT ?").bind(kind, limit)
-    : env.DB.prepare("SELECT * FROM items ORDER BY created_at DESC LIMIT ?").bind(limit);
+    ? env.DB.prepare("SELECT * FROM items WHERE kind = ? ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(kind, limit, offset)
+    : env.DB.prepare("SELECT * FROM items ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(limit, offset);
   const { results } = await stmt.all<Item>();
   const stats = await env.DB.prepare("SELECT kind, COUNT(*) n, COALESCE(SUM(size),0) bytes FROM items GROUP BY kind").all();
   return json({ items: results.map((it) => ({ ...links(req, it), name: it.name, mime: it.mime, size: it.size, alt: it.alt, nsfw: it.nsfw, views: it.views, created_at: new Date(it.created_at * 1000).toISOString() })), stats: stats.results });
@@ -322,6 +325,14 @@ async function analyze(env: Env, id: string) {
   let aiMime = "image/jpeg";
   if (env.IMAGES) {
     try {
+      // dimensions for og:image:width/height (link previews)
+      const src = await env.FILES.get(it.r2_key);
+      const info = src ? await env.IMAGES.info(src.body) : null;
+      if (info && "width" in info) { it.width = info.width; it.height = info.height; }
+    } catch (e) {
+      console.warn("image info failed", id, String(e));
+    }
+    try {
       const [a, b] = obj.body.tee();
       const out = await env.IMAGES.input(a).transform({ width: 480, height: 480, fit: "scale-down" }).output({ format: "image/webp", quality: 80 });
       thumb = await out.response().arrayBuffer();
@@ -358,7 +369,7 @@ async function analyze(env: Env, id: string) {
       if (answer) it.nsfw = /^\s*yes/i.test(String(answer)) ? 1 : 0;
     } catch (e) { console.warn("nsfw check failed", id, String(e)); }
   }
-  await env.DB.prepare("UPDATE items SET thumb_key = ?, alt = ?, nsfw = ? WHERE id = ?").bind(it.thumb_key, it.alt, it.nsfw, id).run();
+  await env.DB.prepare("UPDATE items SET thumb_key = ?, alt = ?, nsfw = ?, width = ?, height = ? WHERE id = ?").bind(it.thumb_key, it.alt, it.nsfw, it.width ?? null, it.height ?? null, id).run();
   await cacheItem(env, it);
 }
 
@@ -378,9 +389,15 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const m = req.method;
 
   if (m === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
-  if (path === "/" && (m === "GET" || m === "HEAD")) return new Response(landingPage(url.host), { headers: htmlHeaders("public, max-age=300") });
-  if (path === "/robots.txt") return new Response("User-agent: *\nDisallow: /\n", { headers: { "content-type": "text/plain" } });
-  if (m === "GET" && (path.startsWith("/assets/") || path.startsWith("/favicon"))) {
+  if (path === "/" && (m === "GET" || m === "HEAD")) return new Response(landingPage(url.host, { multiMb: Number(env.MAX_MULTIPART_MB || 95), maxMb: Number(env.MAX_STREAM_MB || 500) }), { headers: htmlHeaders("public, max-age=300") });
+  // SEO: only the landing page is meant to be found; uploads carry X-Robots-Tag: noindex (see fetch below).
+  if (path === "/robots.txt") return new Response(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /d/\n\nSitemap: ${url.origin}/sitemap.xml\n`, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } });
+  if (path === "/sitemap.xml") return new Response(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${url.origin}/</loc><changefreq>monthly</changefreq></url></urlset>\n`, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=3600" } });
+  if (path === "/og.png") {
+    const og = await env.FILES.get("_static/og.png");
+    return og ? new Response(og.body, { headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" } }) : notFound();
+  }
+  if (m === "GET" && (path.startsWith("/assets/") || path.startsWith("/favicon") || path === "/llms.txt" || path === "/og-card")) {
     const a = await handleAsset(req, ctx);
     if (a) return a;
   }
@@ -429,6 +446,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   return notFound();
 }
 
+const INDEXABLE = new Set(["/", "/robots.txt", "/sitemap.xml", "/llms.txt", "/og.png", "/favicon.svg", "/favicon.ico"]);
+
 function corsHeaders() {
   return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "access-control-allow-headers": "authorization, content-type, x-expires, x-filename, x-api-key", "access-control-max-age": "86400" };
 }
@@ -437,12 +456,13 @@ export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
     try {
       const res = await route(req, env, ctx);
-      if (new URL(req.url).pathname.startsWith("/api/")) {
-        const r = new Response(res.body, res);
-        for (const [k, v] of Object.entries(corsHeaders())) r.headers.set(k, v);
-        return r;
-      }
-      return res;
+      const path = new URL(req.url).pathname;
+      if (INDEXABLE.has(path) || path.startsWith("/assets/")) return res;
+      // everything user-generated (views, raw files, thumbs, short links, API, 404) stays out of search engines
+      const r = new Response(res.body, res);
+      r.headers.set("x-robots-tag", "noindex, nofollow, noimageindex");
+      if (path.startsWith("/api/")) for (const [k, v] of Object.entries(corsHeaders())) r.headers.set(k, v);
+      return r;
     } catch (e) {
       console.error("unhandled", String(e), (e as Error)?.stack);
       return err(500, "internal error");

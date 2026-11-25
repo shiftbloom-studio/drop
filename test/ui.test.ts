@@ -40,4 +40,21 @@ describe("pages", () => {
     expect(landingPage("drop.test")).toContain("drop.test");
     expect(notFoundPage()).toContain("404");
   });
+  it("shows the upload limit and keeps the tool behind the token gate", () => {
+    const html = landingPage("drop.test", { multiMb: 95, maxMb: 500 });
+    expect(html).toContain('<html lang="en">');
+    expect(html).toContain("up to 500 mb");
+    expect(html).toContain("html:not(.authed) .member{display:none");
+    expect(html).not.toContain('name="robots"');
+  });
+  it("ships inline scripts that parse", () => {
+    const pages = [landingPage("drop.test"), viewPage(item(), links, null), viewPage(item({ kind: "paste", mime: "text/plain" }), links, "x")];
+    for (const html of pages)
+      for (const [, code] of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) expect(() => new Function(code)).not.toThrow();
+  });
+  it("renders view dates as <time> for local conversion and stays noindex", () => {
+    const html = viewPage(item({ expires_at: 1_790_003_600 }), links, null);
+    expect(html).toContain('<time datetime="');
+    expect(html).toContain('name="robots" content="noindex"');
+  });
 });
