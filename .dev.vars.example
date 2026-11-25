@@ -6,3 +6,7 @@ API_TOKEN=change-me
 # Optional: abuse.ch MalwareBazaar Auth-Key (free account at https://auth.abuse.ch/).
 # When set, the SHA-256 of every upload is looked up and known malware is put on hold.
 # MB_AUTH_KEY=
+
+# Optional: Turnstile secret for token requests at /request (pair it with the TURNSTILE_SITE_KEY var).
+# Turnstile's test secret that always passes: 1x0000000000000000000000000000000AA
+# TURNSTILE_SECRET=

@@ -3,7 +3,8 @@
  * Storage: R2 (blobs + thumbnails), D1 (metadata, source of truth), KV (hot lookup cache for short ids).
  * Background: Queue consumer builds thumbnails (Images binding) and alt text + NSFW flag (Workers AI).
  */
-import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, deletePage, legalPage, configureUi } from "./ui.js";
+import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, deletePage, legalPage, configureUi, requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "./ui.js";
+import { CLAIM_WINDOW, KEEP_REQUESTS, MAX_PENDING, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile, type RequestRow } from "./requests";
 import { sniff, blockReason, effectiveType, INLINE_TYPES, stripJpegLocation, stripPngLocation, inspectZip } from "./safety";
 import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName } from "./util";
 
@@ -27,6 +28,11 @@ export interface Env {
   ABUSE_EMAIL?: string;
   /** Operator details for the imprint and privacy policy, as JSON. Legal pages are hidden when unset. */
   LEGAL?: string;
+  /** Token requests at /request: on when both Turnstile keys are set. */
+  TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET?: string;
+  /** Rate limiter for sent token requests, per IP. */
+  REQ_RL?: RateLimit;
 }
 
 type Kind = "file" | "paste" | "link";
@@ -348,6 +354,54 @@ function parseLegal(raw?: string): Legal | null {
 
 const notFound = () => new Response(notFoundPage(), { status: 404, headers: htmlHeaders("no-store") });
 
+// ---------- token requests ----------
+const TURNSTILE = "https://challenges.cloudflare.com";
+const REQUEST_CSP = PAGE_CSP.replace("script-src 'self' 'unsafe-inline'", `script-src 'self' 'unsafe-inline' ${TURNSTILE}`).replace("frame-src 'self'", `frame-src 'self' ${TURNSTILE}`).replace("connect-src 'self'", `connect-src 'self' ${TURNSTILE}`);
+/** Claim pages carry a secret in the path: never cached, never indexed, never sent as a referrer. */
+const reqHtml = (body: string, status = 200, csp = PAGE_CSP) =>
+  new Response(body, { status, headers: { ...htmlHeaders("no-store"), "content-security-policy": csp, "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" } });
+
+async function handleTokenRequest(req: Request, env: Env, url: URL): Promise<Response> {
+  const siteKey = env.TURNSTILE_SITE_KEY!, now = Math.floor(Date.now() / 1000);
+  const form404 = (error: string, v: { name?: string; reason?: string } = {}, status = 400) => reqHtml(requestPage(siteKey, { error, ...v }), status, REQUEST_CSP);
+  if (env.REQ_RL && !(await env.REQ_RL.limit({ key: ip(req) })).success) return form404("Too many requests from your connection. Wait a minute, then try again.", {}, 429);
+  if (Number(req.headers.get("content-length") || 0) > 16384) return form404("That\u2019s too long. Keep it short.", {}, 413);
+  let form: FormData;
+  try { form = await req.formData(); } catch { return form404("Something went wrong. Reload the page and try again."); }
+  const v = readRequestForm(form);
+  if ("error" in v) return form404(v.error, { name: String(form.get("name") || ""), reason: String(form.get("reason") || "") });
+  if (!(await verifyTurnstile(env.TURNSTILE_SECRET!, String(form.get("cf-turnstile-response") || ""), req.headers.get("cf-connecting-ip"))))
+    return form404("We couldn\u2019t confirm you\u2019re a person. Try the check again.", v, 403);
+  // housekeeping: forget old requests, but keep approved ones until their claim window has passed
+  await env.DB.prepare("DELETE FROM token_requests WHERE created_at < ? AND (status != 'approved' OR decided_at < ?)").bind(now - KEEP_REQUESTS, now - CLAIM_WINDOW).run();
+  const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM token_requests WHERE status = 'pending'").first<{ n: number }>();
+  if ((pending?.n ?? 0) >= MAX_PENDING) return form404("We have a lot of requests waiting right now. Try again in a few days.", v, 503);
+  const code = newClaimCode();
+  await env.DB.prepare("INSERT INTO token_requests (id, name, reason, claim_hash, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)")
+    .bind(randomString(12), v.name, v.reason, await sha256Hex(code), now).run();
+  return reqHtml(requestSentPage(`${url.origin}/request/${code}`));
+}
+
+async function handleClaim(req: Request, env: Env, code: string): Promise<Response> {
+  const hash = await sha256Hex(code), now = Math.floor(Date.now() / 1000);
+  const row = isClaimCode(code) ? await env.DB.prepare("SELECT id, status, decided_at, token_expires_at FROM token_requests WHERE claim_hash = ?").bind(hash).first<Pick<RequestRow, "id" | "status" | "decided_at" | "token_expires_at">>() : null;
+  if (!row) return (await missLimited(req, env)) ?? notFound();
+  const state = requestState(row, now);
+  if (req.method === "POST" && state === "approved") {
+    const tok = await newApiToken();
+    // one statement each, in one transaction: the token row only appears if the request is still collectable
+    const [ins] = await env.DB.batch([
+      env.DB.prepare(`INSERT INTO api_tokens (id, label, prefix, hash, created_at, created_by, expires_at)
+        SELECT ?, COALESCE(label, 'request: ' || name), ?, ?, ?, 'request', token_expires_at FROM token_requests
+        WHERE claim_hash = ? AND status = 'approved' AND decided_at >= ?`).bind(tok.id, tok.prefix, tok.hash, now, hash, now - CLAIM_WINDOW),
+      env.DB.prepare("UPDATE token_requests SET status = 'claimed', claimed_at = ?, token_id = ? WHERE claim_hash = ? AND status = 'approved' AND decided_at >= ?").bind(now, tok.id, hash, now - CLAIM_WINDOW),
+    ]);
+    if ((ins.meta?.changes ?? 0) === 1) return reqHtml(tokenShownPage(tok.secret, row.token_expires_at));
+    return reqHtml(requestStatusPage("claimed"));
+  }
+  return reqHtml(requestStatusPage(state));
+}
+
 async function serveView(req: Request, env: Env, ctx: ExecutionContext, it: Item) {
   ctx.waitUntil(env.DB.prepare("UPDATE items SET views = views + 1 WHERE id = ?").bind(it.id).run());
   if (it.kind === "link") return Response.redirect(it.target!, 302);
@@ -516,7 +570,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (m === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
   if (path === "/" && (m === "GET" || m === "HEAD")) return new Response(landingPage(url.host, { multiMb: Number(env.MAX_MULTIPART_MB || 95), maxMb: Number(env.MAX_STREAM_MB || 500) }), { headers: htmlHeaders("public, max-age=300") });
   // SEO: only the landing page is meant to be found; uploads carry X-Robots-Tag: noindex (see fetch below).
-  if (path === "/robots.txt") return new Response(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /d/\n\nSitemap: ${url.origin}/sitemap.xml\n`, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } });
+  if (path === "/robots.txt") return new Response(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /d/\nDisallow: /request/\n\nSitemap: ${url.origin}/sitemap.xml\n`, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } });
   if (path === "/sitemap.xml") return new Response(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${url.origin}/</loc><changefreq>monthly</changefreq></url></urlset>\n`, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=3600" } });
   if (path === "/og.png") {
     const og = await env.FILES.get("_static/og.png");
@@ -531,7 +585,18 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (LEGAL_PATHS[path] && (m === "GET" || m === "HEAD")) {
     const legal = parseLegal(env.LEGAL);
     if (!legal) return notFound();
-    return new Response(legalPage(LEGAL_PATHS[path], legal, { malwareLookup: !!env.MB_AUTH_KEY, abuseEmail: env.ABUSE_EMAIL || null }), { headers: htmlHeaders("public, max-age=3600") });
+    return new Response(legalPage(LEGAL_PATHS[path], legal, { malwareLookup: !!env.MB_AUTH_KEY, abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET) }), { headers: htmlHeaders("public, max-age=3600") });
+  }
+
+  if (env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET && (path === "/request" || path.startsWith("/request/"))) {
+    if (path === "/request") {
+      if (m === "GET" || m === "HEAD") return reqHtml(requestPage(env.TURNSTILE_SITE_KEY), 200, REQUEST_CSP);
+      if (m === "POST") return handleTokenRequest(req, env, url);
+    } else {
+      const code = path.slice(9);
+      if (m === "GET" || m === "HEAD" || m === "POST") return handleClaim(req, env, code);
+    }
+    return err(405, "method not allowed");
   }
 
   if (path.startsWith("/api/")) {
@@ -602,7 +667,7 @@ function corsHeaders() {
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
     try {
-      configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null });
+      configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET) });
       const res = await route(req, env, ctx);
       const path = new URL(req.url).pathname;
       if (INDEXABLE.has(path) || path.startsWith("/assets/")) return res;
