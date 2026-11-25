@@ -203,7 +203,7 @@ td.undo{color:var(--ink60);padding:18px 8px}
 @media (max-width:760px){.hero{grid-template-columns:1fr;align-items:start}td.m,th.m{display:none}.mm{display:block}}
 </style></head><body>
 <div class="wrap">
-${topbar(`<div class="who"><span class="member">connected</span><span class="member" aria-hidden="true">·</span><button class="lnk member" id="logout" type="button">sign out</button><a class="sb anon" href="https://shiftbloom.studio">shiftbloom studio<i>.</i></a></div>`)}
+${topbar(`<div class="who"><span class="member">token saved</span><span class="member" aria-hidden="true">·</span><button class="lnk member" id="logout" type="button">Forget token</button><a class="sb anon" href="https://shiftbloom.studio">shiftbloom studio<i>.</i></a></div>`)}
 <section class="hero">
   <div><span class="label member" id="stats"></span>
   <h1 style="margin-top:14px">Every file gets five characters<em>.</em></h1>
@@ -229,9 +229,9 @@ ${topbar(`<div class="who"><span class="member">connected</span><span class="mem
   <div class="sx"><span class="label">sharex configs</span><a href="#" data-sx="upload">uploads</a><a href="#" data-sx="paste">text</a><a href="#" data-sx="shorten">short links</a></div>
 </section>
 
-<section class="list member" id="recent" aria-labelledby="recent-h"><div class="row"><h2 id="recent-h">Recent uploads</h2><label class="exp"><span class="sr">Show</span><button class="btn ghost sm" id="reload" type="button">Refresh</button><select id="kind"><option value="">all</option><option value="file">files</option><option value="paste">pastes</option><option value="link">links</option></select></label></div>
+<section class="list member" id="recent" aria-labelledby="recent-h"><div class="row"><h2 id="recent-h">Recent uploads</h2><label class="exp"><span class="sr">Show</span><button class="btn ghost sm" id="reload" type="button">Refresh</button><select id="kind"><option value="">All</option><option value="file">Files</option><option value="paste">Pastes</option><option value="link">Links</option></select></label></div>
 <table id="list"><thead><tr><th scope="col"><span class="sr">Preview</span></th><th scope="col">Name</th><th scope="col" class="m" style="text-align:right">Details</th><th scope="col"><span class="sr">Action</span></th></tr></thead><tbody></tbody></table>
-<p class="hint" id="empty" hidden style="margin-top:14px">Nothing here yet.</p>
+<p class="hint" id="empty" hidden style="margin-top:14px"></p>
 <div class="more"><button class="btn ghost sm" id="more" type="button" hidden>Load more</button></div></section>
 ${footer()}
 </div>
@@ -245,14 +245,14 @@ const num=(n,d)=>n.toLocaleString('en-GB',{maximumFractionDigits:d});
 const fs=n=>{const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<3){n/=1024;i++}return num(n,i?1:0)+' '+u[i]};
 const when=s=>new Date(s).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
 const BAD='That token doesn’t work. Check API_TOKEN in your Worker secrets.';
-function why(st,b){if(st===401)return BAD;if(st===413&&/paste/.test((b&&b.error)||''))return'That’s more than 10 MB of text. Upload it as a file instead.';return'Something went wrong ('+(st||'offline')+'). Try again in a moment.'}
+function why(st,b){if(st===401)return BAD;if(st===413&&/paste/.test((b&&b.error)||''))return'That’s more than 10 MB of text. Upload it as a file instead.';return st?'Something went wrong ('+st+'). Try again in a moment.':'You’re offline. Try again once you’re connected.'}
 
 // token
 function setMode(on){R.classList.toggle('authed',on);if(on){R.classList.remove('want');load()}}
 async function check(t){try{return(await fetch('/api/list?limit=1',{headers:{authorization:'Bearer '+t}})).status}catch(e){return 0}}
 $('#have').onclick=()=>{R.classList.add('want');$('#have').setAttribute('aria-expanded','true');$('#tok').focus()};
 $('#tokf').onsubmit=async e=>{e.preventDefault();const v=$('#tok').value.trim(),er=$('#tokerr');if(!v)return;er.textContent='';const st=await check(v);
-if(st===200){tok=v;try{localStorage.setItem('drop_token',v)}catch(x){}$('#tok').value='';setMode(true);say('connected');return}
+if(st===200){tok=v;try{localStorage.setItem('drop_token',v)}catch(x){}$('#tok').value='';setMode(true);say('token saved');return}
 er.textContent=why(st)};
 $('#logout').onclick=()=>{try{localStorage.removeItem('drop_token')}catch(e){}tok='';setMode(false);};
 
@@ -272,7 +272,7 @@ const b=document.createElement('button');b.className='btn sm';b.type='button';b.
 const hdr=x=>{x.setRequestHeader('authorization','Bearer '+tok);x.setRequestHeader('x-expires',$('#exp').value)};
 function one(f){const d=row('');if(f.size>LIM.max*MiB)return fail(d,f.name+' is '+fs(f.size)+'. The limit is '+LIM.max+' MB.');if(!f.size)return fail(d,f.name+' is empty.');
 const x=new XMLHttpRequest(),bar=document.createElement('i'),nm=document.createElement('span'),pc=document.createElement('span'),c=document.createElement('button');
-bar.className='bar';nm.className='nm';nm.textContent='Uploading '+f.name+' …';pc.className='pct';pc.textContent='0 %';c.type='button';c.className='x';c.textContent='cancel';c.onclick=()=>x.abort();d.append(bar,nm,pc,c);
+bar.className='bar';nm.className='nm';nm.textContent='Uploading '+f.name+' …';pc.className='pct';pc.textContent='0 %';c.type='button';c.className='x';c.textContent='Cancel';c.onclick=()=>x.abort();d.append(bar,nm,pc,c);
 x.upload.onprogress=e=>{if(!e.lengthComputable)return;const p=e.loaded/e.total;bar.style.width=(p*100)+'%';pc.textContent=Math.floor(p*100)+' % · '+fs(e.loaded)+' of '+fs(e.total)};
 x.onload=()=>{let b=null;try{b=JSON.parse(x.responseText)}catch(e){}if(x.status>=200&&x.status<300&&b&&b.url)done(d,b);else fail(d,x.status===413?f.name+' is '+fs(f.size)+'. The limit is '+LIM.max+' MB.':why(x.status,b))};
 x.onerror=()=>fail(d,why(0));x.onabort=()=>d.remove();
@@ -285,7 +285,7 @@ addEventListener('paste',e=>{if(!R.classList.contains('authed')||/TEXTAREA|INPUT
 
 // pastes and links
 const URLBAD='That doesn’t look like a link. It needs to start with http:// or https://.';
-async function api(path,body){const d=row('');d.textContent='saving …';try{const r=await fetch(path,{method:'POST',headers:{...A(),'x-expires':$('#exp').value,'content-type':'application/json'},body:JSON.stringify(body)});let b=null;try{b=await r.json()}catch(e){}
+async function api(path,body){const d=row('');d.textContent='Saving …';try{const r=await fetch(path,{method:'POST',headers:{...A(),'x-expires':$('#exp').value,'content-type':'application/json'},body:JSON.stringify(body)});let b=null;try{b=await r.json()}catch(e){}
 if(r.ok&&b&&b.url){done(d,b);return true}fail(d,path==='/api/shorten'&&r.status===400?URLBAD:why(r.status,b))}catch(e){fail(d,why(0))}return false}
 $('#p-paste').onsubmit=async e=>{e.preventDefault();const t=$('#ptext').value;if(!t.trim())return fail(row(''),'There’s nothing to save yet.');if(await api('/api/paste',{content:t,lang:$('#plang').value.trim()}))$('#ptext').value=''};
 $('#p-link').onsubmit=async e=>{e.preventDefault();let u=$('#lurl').value.trim();if(!u)return fail(row(''),URLBAD);if(!/^[a-z][a-z0-9+.-]*:/i.test(u))u='https://'+u;
@@ -305,7 +305,7 @@ const mm=document.createElement('div');mm.className='mm';mm.textContent=meta;c1.
 const c3=td(''),x=document.createElement('button');x.className='x';x.type='button';x.textContent='Delete';x.setAttribute('aria-label','Delete '+(it.name||it.id));x.onclick=()=>del(tr,it);c3.append(x);tr.append(c0,c1,td('m',meta),c3);return tr}
 async function load(more){if(!tok)return;if(!more)off=0;const k=$('#kind').value;let r;try{r=await fetch('/api/list?limit='+PAGE+'&offset='+off+(k?'&kind='+k:''),{headers:A()})}catch(e){return}
 if(r.status===401){R.classList.remove('authed');R.classList.add('want');$('#tokerr').textContent=BAD;return}if(!r.ok)return;const d=await r.json();
-stats(d.stats);const tb=$('#list tbody');if(!more)tb.replaceChildren();for(const it of d.items)tb.append(item(it));off+=d.items.length;$('#more').hidden=d.items.length<PAGE;$('#empty').hidden=tb.children.length>0}
+stats(d.stats);const tb=$('#list tbody');if(!more)tb.replaceChildren();for(const it of d.items)tb.append(item(it));off+=d.items.length;$('#more').hidden=d.items.length<PAGE;$('#empty').hidden=tb.children.length>0;$('#empty').textContent={file:'No files yet.',paste:'No pastes yet.',link:'No links yet.'}[k]||'Nothing uploaded yet.'}
 async function refresh(){try{const r=await fetch('/api/list?limit=1',{headers:A()});if(r.ok)stats((await r.json()).stats)}catch(e){}}
 $('#kind').onchange=()=>load();$('#reload').onclick=()=>load();$('#more').onclick=()=>load(true);
 if(tok)load();
