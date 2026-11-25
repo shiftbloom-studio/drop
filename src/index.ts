@@ -625,6 +625,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
       if (m === "GET") return json({ ...it, ...links(req, it) });
       if (m === "POST" && url.searchParams.get("reanalyze") !== null) { await env.JOBS.send({ type: "scan", id: it.id }); return json({ queued: it.id }); }
       if (m === "POST" && url.searchParams.get("release") !== null) {
+        // releasing a quarantined file overrides the scanners, so only the operator's master token may do it
+        if (!who.master) return err(403, "only the operator can release a file on hold");
         await env.DB.prepare("UPDATE items SET blocked = NULL WHERE id = ?").bind(it.id).run();
         it.blocked = null;
         await cacheItem(env, it);
