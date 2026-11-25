@@ -6,7 +6,7 @@
  */
 import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, checkingPage, deletePage, legalPage, configureUi, requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "./ui.js";
 import { CLAIM_WINDOW, KEEP_REQUESTS, MAX_PENDING, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile, type RequestRow } from "./requests";
-import { imageEnd, gifInfo, gifFrames, encodePng } from "./frames";
+import { imageEnd, gifInfo, gifFrames, encodePng, isAnimatedStill } from "./frames";
 import { sniff, blockReason, effectiveType, INLINE_TYPES, stripJpegLocation, stripPngLocation, inspectZip } from "./safety";
 import { brandFrom, type BrandEnv } from "./brand";
 import { CHECKING, NOT_CHECKED, limitKey, PUBLIC_ACTION, PUBLIC_ID_LENGTH, PUBLIC_OWNER, PUBLIC_PREFIX, publicEnabled, publicExpiry, publicLimits, publicTypeAllowed, publicNameMatches, PUBLIC_TYPES, PUBLIC_GIF_MAX_FRAMES, PUBLIC_GIF_MAX_PIXELS, PUBLIC_GIF_MAX_WORK, usageKey, utcDay, withinDailyCap, type PublicEnv, type PublicLimits } from "./public";
@@ -159,11 +159,12 @@ function publicFileProblem(name: string, mime: string, bytes: Uint8Array): { sta
   }
   if (!mime.startsWith("image/")) return null;
   if (imageEnd(mime, bytes) === null) return { status: 422, message: `${name} looks damaged, so it wasn\u2019t uploaded.` };
+  if (isAnimatedStill(mime, bytes)) return { status: 415, message: `Without a token, animated images have to be GIFs. Save ${name} as a GIF and try again.` };
   if (mime === "image/gif") {
     const g = gifInfo(bytes);
     const px = g ? g.width * g.height : 0;
     if (!g || !px || !g.frames) return { status: 422, message: `${name} looks damaged, so it wasn\u2019t uploaded.` };
-    if (g.frames > PUBLIC_GIF_MAX_FRAMES || px > PUBLIC_GIF_MAX_PIXELS || px * g.frames > PUBLIC_GIF_MAX_WORK)
+    if (g.frames > PUBLIC_GIF_MAX_FRAMES || px > PUBLIC_GIF_MAX_PIXELS || g.work + px * g.frames > PUBLIC_GIF_MAX_WORK)
       return { status: 413, message: `Without a token, GIFs can have up to ${PUBLIC_GIF_MAX_FRAMES} frames. ${name} is too long to check.` };
   }
   return null;

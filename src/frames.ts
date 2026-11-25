@@ -92,9 +92,32 @@ function isoEnd(b: Uint8Array): number | null {
   return sawMeta && p > 0 ? p : null;
 }
 
+/** Animated WebP (ANIM chunk / VP8X animation flag) and APNG (acTL before IDAT). Only their first frame
+ * would reach the sensitive content check, so drop doesn't take them without a token. */
+export function isAnimatedStill(mime: string, b: Uint8Array): boolean {
+  if (mime === "image/webp") {
+    if (ascii(b, 12, "VP8X") && b[20] & 0x02) return true;
+    for (let p = 12; p + 8 <= b.length; ) {
+      if (ascii(b, p, "ANIM") || ascii(b, p, "ANMF")) return true;
+      const len = u32le(b, p + 4);
+      p += 8 + len + (len % 2);
+    }
+    return false;
+  }
+  if (mime === "image/png") {
+    for (let p = 8; p + 12 <= b.length; ) {
+      if (ascii(b, p + 4, "acTL")) return true;
+      if (ascii(b, p + 4, "IDAT") || ascii(b, p + 4, "IEND")) return false;
+      p += 12 + u32be(b, p);
+    }
+  }
+  return false;
+}
+
 // ---------- GIF ----------
 
-export type GifInfo = { width: number; height: number; frames: number; end: number };
+/** `work` is the sum of all frame areas, which is what decoding them costs. */
+export type GifInfo = { width: number; height: number; frames: number; work: number; end: number };
 
 /** Walks a GIF's blocks without decoding pixels: canvas size, frame count and where the trailer ends. */
 export function gifInfo(b: Uint8Array): GifInfo | null {
@@ -102,7 +125,7 @@ export function gifInfo(b: Uint8Array): GifInfo | null {
   const width = u16le(b, 6), height = u16le(b, 8);
   let p = 13;
   if (b[10] & 0x80) p += 3 * (1 << ((b[10] & 7) + 1));
-  let frames = 0;
+  let frames = 0, work = 0;
   const skipSub = () => {
     while (p < b.length && b[p] !== 0) p += b[p] + 1;
     if (p >= b.length) throw new Error("truncated");
@@ -110,9 +133,13 @@ export function gifInfo(b: Uint8Array): GifInfo | null {
   };
   while (p < b.length) {
     const t = b[p];
-    if (t === 0x3b) return { width, height, frames, end: p + 1 };
+    if (t === 0x3b) return { width, height, frames, work, end: p + 1 };
     if (t === 0x21) { p += 2; skipSub(); continue; }
     if (t !== 0x2c || p + 10 > b.length) return null;
+    // a frame has to lie inside the canvas, or its size would decide what decoding allocates
+    const fx = u16le(b, p + 1), fy = u16le(b, p + 3), fw = u16le(b, p + 5), fh = u16le(b, p + 7);
+    if (!fw || !fh || fx + fw > width || fy + fh > height) return null;
+    work += fw * fh;
     const packed = b[p + 9];
     p += 10;
     if (packed & 0x80) p += 3 * (1 << ((packed & 7) + 1));
@@ -196,12 +223,14 @@ export function* gifFrames(b: Uint8Array, max = 512): Generator<{ width: number;
     }
     if (t !== 0x2c) return;
     const fx = u16le(b, p + 1), fy = u16le(b, p + 3), fw = u16le(b, p + 5), fh = u16le(b, p + 7), packed = b[p + 9];
+    if (!fw || !fh || fx + fw > W || fy + fh > H) throw new Error("GIF frame outside its canvas");
     p += 10;
     let ct = gct;
     if (packed & 0x80) { const n = 3 * (1 << ((packed & 7) + 1)); ct = b.subarray(p, p + n); p += n; }
     const min = b[p++];
     const idx = lzw(Math.min(Math.max(min, 2), 11), sub(), fw * fh);
-    const before = disposal === 3 ? canvas.slice() : null;
+    // "restore to previous" only needs the area this frame paints over
+    const before = disposal === 3 ? Array.from({ length: fh }, (_, r) => canvas.slice(((fy + r) * W + fx) * 4, ((fy + r) * W + fx + fw) * 4)) : null;
     const rows = rowOrder(fh, !!(packed & 0x40));
     for (let r = 0; r < fh; r++) {
       const y = fy + rows[r];
@@ -230,7 +259,7 @@ export function* gifFrames(b: Uint8Array, max = 512): Generator<{ width: number;
     if (key !== lastKey) { lastKey = key; yield { width: w, height: h, rgb }; }
     if (disposal === 2) {
       for (let y = fy; y < Math.min(H, fy + fh); y++) canvas.fill(0, (y * W + fx) * 4, (y * W + Math.min(W, fx + fw)) * 4);
-    } else if (before) canvas.set(before);
+    } else if (before) before.forEach((row, r) => canvas.set(row, ((fy + r) * W + fx) * 4));
     trans = -1; disposal = 0;
   }
 }

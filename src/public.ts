@@ -82,8 +82,9 @@ export function publicNameMatches(name: string, mime: string): boolean {
 }
 /** Animated GIFs without a token: every frame is checked, so frames and size are capped. */
 export const PUBLIC_GIF_MAX_FRAMES = 120;
-export const PUBLIC_GIF_MAX_PIXELS = 4096 * 4096;
-/** Canvas pixels times frames: what decoding all frames costs. */
+/** Canvas size: decoding keeps one RGBA canvas (16 MB at this size) in memory. */
+export const PUBLIC_GIF_MAX_PIXELS = 2048 * 2048;
+/** All frame areas added up, and the canvas once per frame for the scaled copy: what decoding costs. */
 export const PUBLIC_GIF_MAX_WORK = 80_000_000;
 
 /** UTC day number, the window of the daily cap. */

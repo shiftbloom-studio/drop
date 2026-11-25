@@ -186,6 +186,10 @@ describe("public uploads on Node.js", () => {
     const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
     expect((await up(png, "dot.jpg")).status).toBe(415);
     expect((await up(png.subarray(0, 40), "dot.png")).status).toBe(422);
+    const bomb = Uint8Array.from(atob("R0lGODlhABAAEIAAAAAAAP///yH5BAwAAAAALAAAAAAAEAAQAAICRAEAIfkEDAAAAAAsAAAAAAAQABAAAgJEAQA7"), (c) => c.charCodeAt(0));
+    expect((await up(bomb, "bomb.gif")).status).toBe(413);
+    const apng = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAACGFjVEwAAAACAAAAAPONk3AAAAAaZmNUTAAAAAAAAAAIAAAACAAAAAAAAAAAAAEAFAAA5PY0GAAAABJJREFUeJxj/M+AHTDhEB+kEgDNQQEP6EHibwAAABpmY1RMAAAAAQAAAAgAAAAIAAAAAAAAAAAAAQAUAAB/hd7MAAAAF2ZkQVQAAAACeJxjZPjPgBUwYRcerBIAzEIBD4VMhLYAAAAASUVORK5CYII="), (c) => c.charCodeAt(0));
+    expect((await up(apng, "moving.png")).status).toBe(415);
     const tail = new Uint8Array([0x50, 0x4b, 3, 4, 9, 9, 9, 9]);
     const both = new Uint8Array(png.length + tail.length); both.set(png); both.set(tail, png.length);
     const r = await up(both, "dot.png");

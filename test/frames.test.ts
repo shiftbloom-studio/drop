@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { encodePng, gifFrames, gifInfo, imageEnd } from "../src/frames";
-import { publicNameMatches, publicTypeAllowed } from "../src/public";
+import { encodePng, gifFrames, gifInfo, imageEnd, isAnimatedStill } from "../src/frames";
+import { PUBLIC_GIF_MAX_PIXELS, publicNameMatches, publicTypeAllowed } from "../src/public";
 
 const b64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const cat = (...p: Uint8Array[]) => { const o = new Uint8Array(p.reduce((n, x) => n + x.length, 0)); let i = 0; for (const x of p) { o.set(x, i); i += x.length; } return o; };
@@ -33,7 +33,7 @@ describe("imageEnd", () => {
 
 describe("gif", () => {
   it("counts frames without decoding", () => {
-    expect(gifInfo(GIF)).toEqual({ width: 40, height: 30, frames: 4, end: GIF.length });
+    expect(gifInfo(GIF)).toMatchObject({ width: 40, height: 30, frames: 4, end: GIF.length });
   });
   it("decodes every frame as shown", () => {
     const frames = [...gifFrames(GIF)];
@@ -48,6 +48,27 @@ describe("gif", () => {
   it("scales large frames down", () => {
     const [f] = gifFrames(GIF, 20);
     expect([f.width, f.height]).toEqual([20, 15]);
+  });
+});
+
+describe("abuse", () => {
+  const BOMB = b64("R0lGODlhABAAEIAAAAAAAP///yH5BAwAAAAALAAAAAAAEAAQAAICRAEAIfkEDAAAAAAsAAAAAAAQABAAAgJEAQA7");
+  const OUTSIDE = b64("R0lGODlhAQABAIAAAAAAAP///yH5BAwAAAAALAAAAAD/////AAICRAEAOw==");
+  it("puts a tiny GIF with a huge canvas over the public limits before anything is decoded", () => {
+    const g = gifInfo(BOMB)!;
+    expect(g).toMatchObject({ width: 4096, height: 4096, frames: 2, work: 2 * 4096 * 4096 });
+    expect(g.width * g.height).toBeGreaterThan(PUBLIC_GIF_MAX_PIXELS);
+  });
+  it("refuses frames that don't fit the canvas", () => {
+    expect(gifInfo(OUTSIDE)).toBeNull();
+    expect(imageEnd("image/gif", OUTSIDE)).toBeNull();
+    expect(() => [...gifFrames(OUTSIDE)]).toThrow();
+  });
+  it("spots animated WebP and APNG, and leaves stills alone", () => {
+    expect(isAnimatedStill("image/webp", b64("UklGRsoAAABXRUJQVlA4WAoAAAACAAAABwAABwAAQU5JTQYAAAAAAAAAAABBTk1GSgAAAAAAAAAAAAcAAAcAADIAAAJWUDggMgAAADABAJ0BKggACAABQCYloAADcAD+8ut///mwP/bz/wR6Af//0uD//pcH//S4P/SkAAAAQU5NRkwAAAAAAAAAAAAHAAAHAAAyAAAAVlA4IDQAAAA0AQCdASoIAAgAAAAmJaAAA3AA/ukiH//3nz//ufP/+58/6M///yn7//I4//8jj/5QIAAA"))).toBe(true);
+    expect(isAnimatedStill("image/png", b64("iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAACGFjVEwAAAACAAAAAPONk3AAAAAaZmNUTAAAAAAAAAAIAAAACAAAAAAAAAAAAAEAFAAA5PY0GAAAABJJREFUeJxj/M+AHTDhEB+kEgDNQQEP6EHibwAAABpmY1RMAAAAAQAAAAgAAAAIAAAAAAAAAAAAAQAUAAB/hd7MAAAAF2ZkQVQAAAACeJxjZPjPgBUwYRcerBIAzEIBD4VMhLYAAAAASUVORK5CYII="))).toBe(true);
+    expect(isAnimatedStill("image/webp", WEBP)).toBe(false);
+    expect(isAnimatedStill("image/png", PNG)).toBe(false);
   });
 });
 
