@@ -226,7 +226,7 @@ ${topbar(`<div class="who"><span class="member">token saved</span><span class="m
 
 <section class="panel gate anon" aria-labelledby="gate-h">
   <h2 id="gate-h">This one’s private.</h2>${UI.requests
-    ? `<p>Uploading here needs a token. Ask for one and we’ll take a look, or run your own drop on your Cloudflare account. The code is open.</p>
+    ? `<p>Uploading here needs a token. You can ask us for one, or set up your own drop on Cloudflare with the open source code.</p>
   <div class="row"><a class="btn" href="/request">Ask for a token</a><a class="btn ghost" href="${SOURCE_URL}#self-hosting">Set up your own</a><button`
     : `<p>Uploading here needs a token, and the token is ours. The code is open though, so you can run your own drop on your Cloudflare account.</p>
   <div class="row"><a class="btn" href="${SOURCE_URL}#self-hosting">Set up your own</a><button`} class="lnk" id="have" type="button" aria-controls="tokf" aria-expanded="false">I have a token</button></div>
@@ -579,7 +579,7 @@ export function requestPage(siteKey: string, o: { error?: string; name?: string;
   return `${head("Ask for a token · drop.", `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>`)}${REQ_CSS}</style></head><body><div class="wrap">${topbar()}
 <section class="req">
   <div><span class="label">token request</span><h1 style="margin-top:14px">Ask for a token<em>.</em></h1>
-  <p class="lead">Uploads here need a token. Tell us who you are and what you want to share, and we’ll take a look. If it’s a yes, you collect the token through a private link.</p></div>
+  <p class="lead">Tell us who you are and what you’d like to share. If it’s a yes, you pick up the token through a private link that you get on the next page.</p></div>
   <form class="panel" method="post" action="/request">
     <label class="f">Your name<input name="name" required minlength="2" maxlength="80" autocomplete="name" value="${esc(o.name || "")}"></label>
     <label class="f">What do you want to upload?<textarea name="reason" required minlength="10" maxlength="600" placeholder="Screenshots from ShareX for our team chat">${esc(o.reason || "")}</textarea></label>
@@ -605,7 +605,7 @@ export function requestStatusPage(state: "pending" | "approved" | "rejected" | "
   switch (state) {
     case "pending": return simplePage("In review · drop.", "in review", "Still in review<em>.</em>", "Nobody has looked at your request yet. This link keeps working, so check back later.", back);
     case "approved": return simplePage("Approved · drop.", "approved", "Approved<em>.</em>", "Your token is ready. It’s shown only once, so have somewhere to paste it.", `<form method="post"><button class="btn" type="submit">Show my token</button></form>`);
-    case "rejected": return simplePage("Not approved · drop.", "not approved", "Not approved<em>.</em>", "Sorry, we can’t give you a token for this.", back);
+    case "rejected": return simplePage("Not approved · drop.", "not approved", "Not approved<em>.</em>", "Sorry, we can’t give you a token for this. You can still run your own drop with the code on GitHub.", back);
     case "claimed": return simplePage("Collected · drop.", "collected", "Already collected<em>.</em>", "This token was shown once and can’t be shown again. If you lost it, ask for a new one.", `<a class="btn" href="/request">Ask again</a>`);
     case "lapsed": return simplePage("Expired · drop.", "expired", "This link has run out<em>.</em>", "Approved tokens have to be collected within 14 days. Ask again and we’ll take another look.", `<a class="btn" href="/request">Ask again</a>`);
   }
