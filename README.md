@@ -93,7 +93,7 @@ All `/api/*` routes need `Authorization: Bearer <token>`. `X-API-Key: <token>` a
 | `PUT` | `/api/upload?filename=x.mp4` | raw bytes | streamed to R2, up to `MAX_STREAM_MB` |
 | `POST` | `/api/paste` | JSON `{content, lang, title, expires}`, form `content`, or raw text | |
 | `POST` | `/api/shorten` | JSON `{url, expires}`, form `url`, or raw text | |
-| `GET` | `/api/list?limit=50&kind=file` | | recent items + totals |
+| `GET` | `/api/list?limit=50&kind=file` | | your recent items + totals (each token sees only its own; the master token also sees items from before owners were recorded) |
 | `GET` / `DELETE` | `/api/items/:id` | | `POST /api/items/:id?reanalyze` re-queues AI |
 | `GET` | `/api/sharex?type=upload\|paste\|shorten` | | ready-made `.sxcu` |
 
