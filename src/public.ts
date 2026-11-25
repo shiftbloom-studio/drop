@@ -18,6 +18,8 @@ export const PUBLIC_MAX_SECONDS = 12 * 3600;
 export const PUBLIC_EXPIRY: Record<string, number> = { "10m": 600, "1h": 3600, "12h": PUBLIC_MAX_SECONDS };
 /** Held back until the background scan has run; the link answers "still checking" meanwhile. */
 export const CHECKING = "checking";
+/** Placed on a public image whose sensitive content check didn't produce an answer. Only the operator can release it. */
+export const NOT_CHECKED = "not checked";
 /** Length of public item ids. With 57 characters that is about 58 bits: links work only for whoever has them. */
 export const PUBLIC_ID_LENGTH = 10;
 /** Turnstile action the public upload widget runs with. */
@@ -73,4 +75,19 @@ export const usageKey = (ip: string, day: number, secret: string) => sha256Hex(`
 export function withinDailyCap(used: { uploads: number; bytes: number } | null | undefined, bytes: number, lim: PublicLimits) {
   const u = used ?? { uploads: 0, bytes: 0 };
   return u.uploads + 1 <= lim.dailyUploads && u.bytes + bytes <= lim.dailyBytes;
+}
+
+/**
+ * The address limits count against. IPv4 as is; IPv6 by its /64 prefix, because one connection usually
+ * gets a whole /64 and could otherwise rotate through addresses to dodge the limits.
+ */
+export function limitKey(ip: string) {
+  if (!ip.includes(":")) return ip;
+  const a = ip.toLowerCase().split("%")[0];
+  if (/^::ffff:\d+\.\d+\.\d+\.\d+$/.test(a)) return a.slice(7);
+  const [head, tail = ""] = a.split("::");
+  const h = head ? head.split(":") : [], t = a.includes("::") && tail ? tail.split(":") : [];
+  const groups = a.includes("::") ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t] : h;
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return a;
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":")}::/64`;
 }

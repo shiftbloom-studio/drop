@@ -8,7 +8,7 @@ import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, checkingPag
 import { CLAIM_WINDOW, KEEP_REQUESTS, MAX_PENDING, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile, type RequestRow } from "./requests";
 import { sniff, blockReason, effectiveType, INLINE_TYPES, stripJpegLocation, stripPngLocation, inspectZip } from "./safety";
 import { brandFrom, type BrandEnv } from "./brand";
-import { CHECKING, PUBLIC_ACTION, PUBLIC_ID_LENGTH, PUBLIC_OWNER, PUBLIC_PREFIX, publicEnabled, publicExpiry, publicLimits, publicTypeAllowed, usageKey, utcDay, withinDailyCap, type PublicEnv, type PublicLimits } from "./public";
+import { CHECKING, NOT_CHECKED, limitKey, PUBLIC_ACTION, PUBLIC_ID_LENGTH, PUBLIC_OWNER, PUBLIC_PREFIX, publicEnabled, publicExpiry, publicLimits, publicTypeAllowed, usageKey, utcDay, withinDailyCap, type PublicEnv, type PublicLimits } from "./public";
 import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName, robotsTxt, ownerFilter, canManage, MASTER_OWNER, type Principal } from "./util";
 
 export interface Env extends BrandEnv, PublicEnv {
@@ -318,9 +318,11 @@ function safeRawHeaders(it: Item, obj: R2ObjectBody | R2Object, download: boolea
   // Only an allowlist of passive types is shown inline; everything else (html, svg, scripts, archives,
   // unknown binaries) is a download as application/octet-stream, so nothing uploaded can run on our origin.
   const mime = (it.mime || "").toLowerCase().split(";")[0].trim();
-  const inline = INLINE_TYPES.has(mime) && !download;
+  // a public PDF is only ever a download: the browser's PDF viewer can't run under the sandbox CSP
+  const publicPdf = it.owner === PUBLIC_OWNER && mime === "application/pdf";
+  const inline = INLINE_TYPES.has(mime) && !download && !publicPdf;
   h.set("content-type", !INLINE_TYPES.has(mime) ? "application/octet-stream" : mime === "text/plain" ? "text/plain; charset=utf-8" : mime);
-  if (mime !== "application/pdf") h.set("content-security-policy", "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'");
+  if (mime !== "application/pdf" || publicPdf) h.set("content-security-policy", "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'");
   const fname = (it.name || it.id).replace(/[^\x20-\x7e]/g, "_");
   h.set("content-disposition", `${inline ? "inline" : "attachment"}; filename="${fname}"; filename*=UTF-8''${encodeURIComponent(it.name || it.id)}`);
   return h;
@@ -486,6 +488,7 @@ async function analyze(env: Env, id: string) {
     aiInput = await (await env.FILES.get(it.r2_key))!.arrayBuffer();
     aiMime = it.mime!;
   }
+  let checked = false;
   if (env.AI && aiInput) {
     const model = (env.AI_MODEL || "@cf/moondream/moondream3.1-9B-A2B") as any;
     const image = `data:${aiMime};base64,${toBase64(aiInput)}`;
@@ -502,13 +505,14 @@ async function analyze(env: Env, id: string) {
         question: "Does this image contain nudity, sexual content or graphic gore? Answer only yes or no.",
       } as any);
       const answer = pick(q, "answer");
-      if (answer) it.nsfw = /^\s*yes/i.test(String(answer)) ? 1 : 0;
+      if (answer) { it.nsfw = /^\s*yes/i.test(String(answer)) ? 1 : 0; checked = true; }
     } catch (e) { console.warn("nsfw check failed", id, String(e)); }
   }
   await env.DB.prepare("UPDATE items SET thumb_key = ?, alt = ?, nsfw = ?, width = ?, height = ? WHERE id = ?").bind(it.thumb_key, it.alt, it.nsfw, it.width ?? null, it.height ?? null, id).run();
-  // a public image opens only once the sensitive content check is done, and stays on hold if it flagged the image
-  if (it.blocked === CHECKING) {
-    it.blocked = it.nsfw === 1 ? "flagged as sensitive" : null;
+  // a public image opens only once the sensitive content check has answered "no". If it flagged the image,
+  // or couldn't run (no AI input, an AI error, no answer), the image stays on hold for the operator.
+  if (it.blocked === CHECKING || it.blocked === NOT_CHECKED) {
+    it.blocked = !checked ? NOT_CHECKED : it.nsfw === 1 ? "flagged as sensitive" : null;
     await env.DB.prepare("UPDATE items SET blocked = ? WHERE id = ?").bind(it.blocked, id).run();
     if (it.blocked) console.warn("file on hold", id, it.blocked);
   }
@@ -525,8 +529,9 @@ async function scanFile(env: Env, id: string) {
   const ds = new crypto.DigestStream("SHA-256");
   await obj.body.pipeTo(ds);
   const sha256 = [...new Uint8Array(await ds.digest)].map((x) => x.toString(16).padStart(2, "0")).join("");
-  // "checking" is the placeholder of a public upload that hasn't been scanned yet
-  let blocked = it.blocked === CHECKING ? null : it.blocked ?? null;
+  // "checking" is the placeholder of a public upload that hasn't been scanned yet; "not checked" is retried on re-scan
+  const pending = it.blocked === CHECKING || it.blocked === NOT_CHECKED;
+  let blocked = pending ? null : it.blocked ?? null;
 
   if (!blocked && it.mime === "application/zip") {
     const tailLen = Math.min(it.size, 4 * 1024 * 1024);
@@ -553,7 +558,7 @@ async function scanFile(env: Env, id: string) {
   }
 
   // public images wait for the sensitive content check in `analyze`, which needs Workers AI
-  if (!blocked && it.blocked === CHECKING && env.AI && IMAGE_TYPES.test(it.mime || "")) blocked = CHECKING;
+  if (!blocked && pending && env.AI && IMAGE_TYPES.test(it.mime || "")) blocked = CHECKING;
   await env.DB.prepare("UPDATE items SET sha256 = ?, blocked = ? WHERE id = ?").bind(sha256, blocked, id).run();
   Object.assign(it, { sha256, blocked });
   await cacheItem(env, it);
@@ -578,13 +583,14 @@ async function handlePublic(req: Request, env: Env, ctx: ExecutionContext, url: 
   if (!publicEnabled(env)) return err(404, "unknown endpoint");
   if (req.method !== "POST") return err(405, "method not allowed");
   const lim = publicLimits(env);
-  if (env.PUB_RL && !(await env.PUB_RL.limit({ key: ip(req) })).success) return err(429, "too many uploads, wait a minute");
+  const limitAddr = limitKey(ip(req));
+  if (env.PUB_RL && !(await env.PUB_RL.limit({ key: limitAddr })).success) return err(429, "too many uploads, wait a minute");
   const len = Number(req.headers.get("content-length") || 0);
   if (!len || !req.body) return err(411, "content-length required");
   if (kind === "upload" && !(req.headers.get("content-type") || "").startsWith("multipart/form-data")) return err(415, "send the file as multipart/form-data");
   if (kind === "paste" && len > lim.pasteBytes * 6 + 65536) return err(413, `without a token, pastes are limited to ${Math.round(lim.pasteBytes / 1024)} KB`);
   const day = utcDay();
-  const key = await usageKey(ip(req), day, env.API_TOKEN || env.TURNSTILE_SECRET!);
+  const key = await usageKey(limitAddr, day, env.API_TOKEN || env.TURNSTILE_SECRET!);
   const used = await env.DB.prepare("SELECT uploads, bytes FROM public_usage WHERE key = ? AND day = ?").bind(key, day).first<{ uploads: number; bytes: number }>();
   if (!withinDailyCap(used, len, lim)) return err(429, "That\u2019s today\u2019s limit for uploads without a token. Try again tomorrow.");
   // every upload needs its own Turnstile check, solved on this site for this action

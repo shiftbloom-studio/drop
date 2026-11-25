@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDrop } from "../src/node/app";
 import { MemoryRateLimit } from "../src/node/bindings";
-import { PUBLIC_MAX_SECONDS, publicEnabled, publicExpiry, publicLimits, publicTypeAllowed, usageKey, withinDailyCap } from "../src/public";
+import { PUBLIC_MAX_SECONDS, limitKey, publicEnabled, publicExpiry, publicLimits, publicTypeAllowed, usageKey, withinDailyCap } from "../src/public";
 import { legalPage, landingPage } from "../src/html";
 
 const MASTER = "master-token-for-tests-0123456789";
@@ -39,6 +39,16 @@ describe("public upload rules", () => {
     expect(a).toMatch(/^[0-9a-f]{64}$/);
     expect(a).not.toBe(b);
     expect(a).not.toContain("203");
+  });
+  it("counts IPv6 addresses by their /64", () => {
+    expect(limitKey("203.0.113.7")).toBe("203.0.113.7");
+    expect(limitKey("2001:db8:1:2:3:4:5:6")).toBe("2001:db8:1:2::/64");
+    expect(limitKey("2001:0db8:0001:0002:ffff::1")).toBe("2001:db8:1:2::/64");
+    expect(limitKey("2001:db8::1")).toBe("2001:db8:0:0::/64");
+    expect(limitKey("2001:db8::")).toBe("2001:db8:0:0::/64");
+    expect(limitKey("::1")).toBe("0:0:0:0::/64");
+    expect(limitKey("::ffff:198.51.100.4")).toBe("198.51.100.4");
+    expect(limitKey("2001:db8:1:2:aaaa::1")).toBe(limitKey("2001:db8:1:2:bbbb:cccc:dddd:eeee"));
   });
   it("adds public upload sections to the legal pages only when on", () => {
     const l = { name: "N", street: "S", city: "C", country: { en: "E", de: "D" }, email: "e@example.com", authority: "A" };
@@ -150,6 +160,52 @@ describe("public uploads on Node.js", () => {
     expect((await up("x", "x.txt")).status).toBe(429);
     verdict = { success: true, action: "public-upload", hostname: "127.0.0.1" };
     env.PUB_RL = keep;
+  });
+
+  it("serves public PDFs only as sandboxed downloads", async () => {
+    const pdf = "%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n";
+    const j = await (await up(pdf, "doc.pdf")).json() as { id: string; raw: string };
+    await drop.queue.idle();
+    const r = await realFetch(j.raw);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-disposition")).toMatch(/^attachment/);
+    expect(r.headers.get("content-security-policy")).toContain("sandbox");
+  });
+
+  it("keeps public images on hold unless the sensitive content check answered no", async () => {
+    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+    const env = drop.env as unknown as Record<string, unknown>;
+    let answer: (() => unknown) = () => { throw new Error("AI down"); };
+    env.AI = { run: async (_m: unknown, input: { task: string }) => (input.task === "caption" ? { caption: "a dot" } : answer()) };
+    const status = async (id: string) => (await realFetch(`${drop.url}/${id}`)).status;
+    const blocked = async (id: string) => (await drop.env.DB.prepare("SELECT blocked FROM items WHERE id = ?").bind(id).first<{ blocked: string | null }>())?.blocked;
+    const reanalyze = (id: string) => realFetch(`${drop.url}/api/items/${id}?reanalyze`, { method: "POST", headers: { authorization: `Bearer ${MASTER}` } });
+
+    // the check fails: held, not released
+    const a = await (await up(png, "a.png")).json() as { id: string };
+    await drop.queue.idle();
+    expect(await blocked(a.id)).toBe("not checked");
+    expect(await status(a.id)).toBe(451);
+    // no answer at all: still held
+    answer = () => ({});
+    await reanalyze(a.id); await drop.queue.idle();
+    expect(await blocked(a.id)).toBe("not checked");
+    // flagged: held
+    answer = () => ({ answer: "yes" });
+    await reanalyze(a.id); await drop.queue.idle();
+    expect(await blocked(a.id)).toBe("flagged as sensitive");
+    // a clean answer releases a fresh upload
+    answer = () => ({ result: { answer: "no" } });
+    const b = await (await up(png, "b.png")).json() as { id: string };
+    await drop.queue.idle();
+    expect(await blocked(b.id)).toBeNull();
+    expect(await status(b.id)).toBe(200);
+    // an image type the check can't read (GIF without the Images binding) stays on hold
+    const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 0, 1, 0, 0, 0, 0, 0x3b]);
+    const c = await (await up(gif, "c.gif")).json() as { id: string };
+    await drop.queue.idle();
+    expect(await blocked(c.id)).toBe("not checked");
+    delete env.AI;
   });
 
   it("creates public pastes", async () => {
