@@ -5,7 +5,7 @@
  */
 import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, deletePage, legalPage, configureUi } from "./ui.js";
 import { sniff, blockReason, effectiveType, INLINE_TYPES, stripJpegLocation, stripPngLocation, inspectZip } from "./safety";
-import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, sanitizeName } from "./util";
+import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName } from "./util";
 
 export interface Env {
   FILES: R2Bucket;
@@ -255,10 +255,12 @@ async function handleShorten(req: Request, env: Env) {
   return json(links(req, it), 201);
 }
 
-function sharexConfig(req: Request, env: Env, type: string) {
+// The .sxcu carries the token it was requested with, so a named token yields a config that
+// stops working when that token expires or is revoked.
+function sharexConfig(req: Request, token: string, type: string) {
   const b = baseUrl(req);
   const host = new URL(req.url).host;
-  const common = { Version: "16.1.0", Name: "", DestinationType: "", RequestMethod: "POST", RequestURL: "", Headers: { Authorization: `Bearer ${env.API_TOKEN}` }, Body: "", URL: "{json:url}", DeletionURL: "{json:delete}", ErrorMessage: "{json:error}" } as Record<string, unknown>;
+  const common = { Version: "16.1.0", Name: "", DestinationType: "", RequestMethod: "POST", RequestURL: "", Headers: { Authorization: `Bearer ${token}` }, Body: "", URL: "{json:url}", DeletionURL: "{json:delete}", ErrorMessage: "{json:error}" } as Record<string, unknown>;
   if (type === "paste") Object.assign(common, { Name: `${host} (paste)`, DestinationType: "TextUploader", RequestURL: `${b}/api/paste`, Body: "MultipartFormData", Arguments: { content: "{input}", lang: "txt" } });
   else if (type === "shorten") Object.assign(common, { Name: `${host} (shorten)`, DestinationType: "URLShortener", RequestURL: `${b}/api/shorten`, Body: "MultipartFormData", Arguments: { url: "{input}" }, DeletionURL: "{json:delete}" });
   else Object.assign(common, { Name: `${host} (upload)`, DestinationType: "ImageUploader, FileUploader", RequestURL: `${b}/api/upload`, Body: "MultipartFormData", FileFormName: "file", ThumbnailURL: "{json:thumbnail}" });
@@ -486,6 +488,26 @@ async function cleanup(env: Env) {
 }
 
 // ---------- router ----------
+/**
+ * Returns the token the request is authorised with, or null.
+ * Accepts the API_TOKEN secret (master token) and named tokens from the api_tokens table,
+ * as long as they are not revoked and not expired.
+ */
+async function authenticate(req: Request, env: Env, ctx: ExecutionContext): Promise<string | null> {
+  if (isAuthed(req, env.API_TOKEN)) return env.API_TOKEN;
+  const token = requestToken(req);
+  if (!isNamedToken(token)) return null;
+  const hash = await sha256Hex(token);
+  const row = await env.DB.prepare("SELECT id, expires_at, revoked_at, last_used_at FROM api_tokens WHERE hash = ?")
+    .bind(hash)
+    .first<{ id: string; expires_at: number | null; revoked_at: number | null; last_used_at: number | null }>()
+    .catch(() => null); // table missing until migration 0004 is applied
+  const now = Math.floor(Date.now() / 1000);
+  if (!row || !tokenUsable(row, now)) return null;
+  if (!row.last_used_at || now - row.last_used_at >= 60) ctx.waitUntil(env.DB.prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?").bind(now, row.id).run());
+  return token;
+}
+
 async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
@@ -513,7 +535,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   }
 
   if (path.startsWith("/api/")) {
-    if (!isAuthed(req, env.API_TOKEN)) {
+    const token = await authenticate(req, env, ctx);
+    if (!token) {
       // slow down token guessing: a handful of failed attempts per IP and minute, then 429
       if (env.AUTH_RL && !(await env.AUTH_RL.limit({ key: ip(req) })).success) return err(429, "too many attempts, wait a minute");
       return err(401, "unauthorized: send Authorization: Bearer <token>");
@@ -522,7 +545,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     if (path === "/api/paste" && m === "POST") return handlePaste(req, env);
     if (path === "/api/shorten" && m === "POST") return handleShorten(req, env);
     if (path === "/api/list" && m === "GET") return handleList(req, env);
-    if (path === "/api/sharex" && m === "GET") return sharexConfig(req, env, url.searchParams.get("type") || "upload");
+    if (path === "/api/sharex" && m === "GET") return sharexConfig(req, token, url.searchParams.get("type") || "upload");
     const im = /^\/api\/items\/([A-Za-z0-9]+)$/.exec(path);
     if (im) {
       const it = await env.DB.prepare("SELECT * FROM items WHERE id = ?").bind(im[1]).first<Item>();

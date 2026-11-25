@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extOf, isAuthed, parseExpiry, randomString, sanitizeName, timingSafeEqual, ID_ALPHABET } from "../src/util";
+import { extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, parseExpiry, randomString, sanitizeName, timingSafeEqual, ID_ALPHABET } from "../src/util";
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -54,5 +54,32 @@ describe("ids and auth", () => {
     expect(isAuthed(mk({ authorization: "Bearer nope" }), "s3cret")).toBe(false);
     expect(isAuthed(mk(), "s3cret")).toBe(false);
     expect(isAuthed(mk({ authorization: "Bearer " }), undefined)).toBe(false);
+  });
+});
+
+describe("named tokens", () => {
+  const mk = (h: Record<string, string> = {}, q = "") => new Request("https://d.example/api/list" + q, { headers: h });
+  it("reads the token from header, x-api-key or query", () => {
+    expect(requestToken(mk({ authorization: "Bearer drop_abc" }))).toBe("drop_abc");
+    expect(requestToken(mk({ "x-api-key": "drop_abc" }))).toBe("drop_abc");
+    expect(requestToken(mk({}, "?token=drop_abc"))).toBe("drop_abc");
+    expect(requestToken(mk())).toBe("");
+  });
+  it("only treats well-formed drop_ tokens as named tokens", () => {
+    expect(isNamedToken("drop_" + "a".repeat(40))).toBe(true);
+    expect(isNamedToken("drop_short")).toBe(false);
+    expect(isNamedToken("s3cret-master-token-that-is-long")).toBe(false);
+    expect(isNamedToken("drop_" + "a".repeat(30) + "'; --")).toBe(false);
+  });
+  it("hashes with SHA-256", async () => {
+    expect(await sha256Hex("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  });
+  it("refuses revoked and expired tokens", () => {
+    const t = 1_000_000;
+    expect(tokenUsable({ expires_at: null, revoked_at: null }, t)).toBe(true);
+    expect(tokenUsable({ expires_at: t + 1, revoked_at: null }, t)).toBe(true);
+    expect(tokenUsable({ expires_at: t, revoked_at: null }, t)).toBe(false);
+    expect(tokenUsable({ expires_at: null, revoked_at: t - 5 }, t)).toBe(false);
+    expect(tokenUsable(null, t)).toBe(false);
   });
 });

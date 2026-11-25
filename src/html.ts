@@ -248,7 +248,7 @@ const say=t=>{const l=$('#live');l.textContent='';setTimeout(()=>l.textContent=t
 const num=(n,d)=>n.toLocaleString('en-GB',{maximumFractionDigits:d});
 const fs=n=>{const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<3){n/=1024;i++}return num(n,i?1:0)+' '+u[i]};
 const when=s=>new Date(s).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-const BAD='That token doesn’t work. Check API_TOKEN in your Worker secrets.';
+const BAD='That token doesn’t work. It may be mistyped, expired or revoked.';
 function why(st,b){if(st===401)return BAD;if(st===422&&b&&b.error)return b.error;if(st===429)return'Too many tries. Wait a minute, then try again.';if(st===413&&/paste/.test((b&&b.error)||''))return'That’s more than 10 MB of text. Upload it as a file instead.';return st?'Something went wrong ('+st+'). Try again in a moment.':'You’re offline. Try again once you’re connected.'}
 
 // token

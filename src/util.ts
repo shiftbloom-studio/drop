@@ -18,12 +18,35 @@ export function timingSafeEqual(a: string, b: string) {
   return diff === 0;
 }
 
-/** Accepts `Authorization: Bearer <token>`, `X-API-Key` or `?token=`. */
+/** Prefix of named API tokens (issued from an admin hub and stored hashed in D1). */
+export const TOKEN_PREFIX = "drop_";
+
+/** The token a request carries: `Authorization: Bearer <token>`, `X-API-Key` or `?token=`. */
+export function requestToken(req: Request) {
+  const h = req.headers.get("authorization") || "";
+  return h.startsWith("Bearer ") ? h.slice(7).trim() : req.headers.get("x-api-key") || new URL(req.url).searchParams.get("token") || "";
+}
+
+/** True when the request carries the master token (the API_TOKEN secret). */
 export function isAuthed(req: Request, apiToken: string | undefined) {
   if (!apiToken) return false;
-  const h = req.headers.get("authorization") || "";
-  const token = h.startsWith("Bearer ") ? h.slice(7) : req.headers.get("x-api-key") || new URL(req.url).searchParams.get("token") || "";
+  const token = requestToken(req);
   return token.length > 0 && timingSafeEqual(token, apiToken);
+}
+
+/** Looks like a named token? Cheap check before touching D1. */
+export function isNamedToken(token: string) {
+  return token.startsWith(TOKEN_PREFIX) && /^[A-Za-z0-9_]{20,100}$/.test(token);
+}
+
+export async function sha256Hex(text: string) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** A named token row is usable when it is neither revoked nor past its expiry (unix seconds). */
+export function tokenUsable(row: { expires_at: number | null; revoked_at: number | null } | null | undefined, now = Math.floor(Date.now() / 1000)) {
+  return !!row && row.revoked_at == null && (row.expires_at == null || row.expires_at > now);
 }
 
 export function parseExpiry(v: string | null | undefined): number | null | undefined {
