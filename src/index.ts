@@ -6,9 +6,10 @@
  */
 import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, checkingPage, deletePage, legalPage, configureUi, requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "./ui.js";
 import { CLAIM_WINDOW, KEEP_REQUESTS, MAX_PENDING, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile, type RequestRow } from "./requests";
+import { imageEnd, gifInfo, gifFrames, encodePng } from "./frames";
 import { sniff, blockReason, effectiveType, INLINE_TYPES, stripJpegLocation, stripPngLocation, inspectZip } from "./safety";
 import { brandFrom, type BrandEnv } from "./brand";
-import { CHECKING, NOT_CHECKED, limitKey, PUBLIC_ACTION, PUBLIC_ID_LENGTH, PUBLIC_OWNER, PUBLIC_PREFIX, publicEnabled, publicExpiry, publicLimits, publicTypeAllowed, usageKey, utcDay, withinDailyCap, type PublicEnv, type PublicLimits } from "./public";
+import { CHECKING, NOT_CHECKED, limitKey, PUBLIC_ACTION, PUBLIC_ID_LENGTH, PUBLIC_OWNER, PUBLIC_PREFIX, publicEnabled, publicExpiry, publicLimits, publicTypeAllowed, publicNameMatches, PUBLIC_TYPES, PUBLIC_GIF_MAX_FRAMES, PUBLIC_GIF_MAX_PIXELS, PUBLIC_GIF_MAX_WORK, usageKey, utcDay, withinDailyCap, type PublicEnv, type PublicLimits } from "./public";
 import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName, robotsTxt, ownerFilter, canManage, MASTER_OWNER, type Principal } from "./util";
 
 export interface Env extends BrandEnv, PublicEnv {
@@ -149,6 +150,25 @@ function baseItem(id: string, kind: Kind, expires_at: number | null): Item {
   };
 }
 
+/** Why an upload without a token is refused beyond its type: a name that doesn't fit the bytes,
+ * an image that doesn't parse, or a GIF too long to check frame by frame. */
+function publicFileProblem(name: string, mime: string, bytes: Uint8Array): { status: number; message: string } | null {
+  if (!publicNameMatches(name, mime)) {
+    const ext = PUBLIC_TYPES[mime]?.[0];
+    return { status: 415, message: `${name} doesn\u2019t match its contents${ext ? ` (it\u2019s a .${ext} file)` : ""}. Rename it and try again.` };
+  }
+  if (!mime.startsWith("image/")) return null;
+  if (imageEnd(mime, bytes) === null) return { status: 422, message: `${name} looks damaged, so it wasn\u2019t uploaded.` };
+  if (mime === "image/gif") {
+    const g = gifInfo(bytes);
+    const px = g ? g.width * g.height : 0;
+    if (!g || !px || !g.frames) return { status: 422, message: `${name} looks damaged, so it wasn\u2019t uploaded.` };
+    if (g.frames > PUBLIC_GIF_MAX_FRAMES || px > PUBLIC_GIF_MAX_PIXELS || px * g.frames > PUBLIC_GIF_MAX_WORK)
+      return { status: 413, message: `Without a token, GIFs can have up to ${PUBLIC_GIF_MAX_FRAMES} frames. ${name} is too long to check.` };
+  }
+  return null;
+}
+
 // ---------- API handlers ----------
 const BLOCK_MSG: Record<string, (n: string) => string> = {
   program: (n) => `${n} is a program, script or installer. drop doesn\u2019t host those.`,
@@ -187,7 +207,14 @@ async function handleUpload(req: Request, env: Env, ctx: ExecutionContext, p: Pr
     const reason = scan === "1" ? "malware" : blockReason(name, sniffed);
     if (reason) return err(422, BLOCK_MSG[reason](name));
     const mime = effectiveType(declared, sniffed, bytes.subarray(0, 1024));
-    if (pub && !publicTypeAllowed(mime)) return err(415, `Without a token, drop takes images, videos, audio, PDFs and plain text. ${name} isn\u2019t one of those.`);
+    if (pub && !publicTypeAllowed(mime)) return err(415, `Without a token, drop takes images and plain text. ${name} isn\u2019t one of those.`);
+    if (pub) {
+      const bad = publicFileProblem(name, mime, bytes);
+      if (bad) return err(bad.status, bad.message);
+      // anything appended after the image itself (an archive behind a JPEG, say) is cut off
+      const end = mime.startsWith("image/") ? imageEnd(mime, bytes)! : bytes.length;
+      if (end < bytes.length) bytes = bytes.slice(0, end);
+    }
     if (mime === "image/jpeg") bytes = stripJpegLocation(bytes).bytes;
     else if (mime === "image/png") bytes = stripPngLocation(bytes).bytes;
     const expires_at = pub ? publicExpiry(expiresRaw) : parseExpiry(expiresRaw);
@@ -458,6 +485,8 @@ function toBase64(buf: ArrayBuffer) {
   return btoa(s);
 }
 
+const SENSITIVE_QUESTION = "Does this image contain nudity, sexual content or graphic gore? Answer only yes or no.";
+
 async function analyze(env: Env, id: string) {
   const it = await env.DB.prepare("SELECT * FROM items WHERE id = ?").bind(id).first<Item>();
   if (!it || !it.r2_key) return;
@@ -508,11 +537,35 @@ async function analyze(env: Env, id: string) {
     try {
       const q: any = await env.AI.run(model, {
         task: "query", image, reasoning: false, max_tokens: 5, temperature: 0, stream: false,
-        question: "Does this image contain nudity, sexual content or graphic gore? Answer only yes or no.",
+        question: SENSITIVE_QUESTION,
       } as any);
       const answer = pick(q, "answer");
       if (answer) { it.nsfw = /^\s*yes/i.test(String(answer)) ? 1 : 0; checked = true; }
     } catch (e) { console.warn("nsfw check failed", id, String(e)); }
+    // An animated GIF uploaded without a token: the still above is only its first frame, so every frame
+    // that looks different from the one before goes through the same question. One "yes" holds the file,
+    // and a frame that gets no answer leaves it unchecked (held too).
+    if (checked && it.nsfw !== 1 && it.owner === PUBLIC_OWNER && it.mime === "image/gif") {
+      try {
+        const gif = new Uint8Array(await (await env.FILES.get(it.r2_key))!.arrayBuffer());
+        let frames = 0;
+        for (const f of gifFrames(gif)) {
+          frames++;
+          const png = await encodePng(f.width, f.height, f.rgb);
+          const q: any = await env.AI.run(model, {
+            task: "query", image: `data:image/png;base64,${toBase64(png.buffer as ArrayBuffer)}`, reasoning: false, max_tokens: 5, temperature: 0, stream: false,
+            question: SENSITIVE_QUESTION,
+          } as any);
+          const answer = pick(q, "answer");
+          if (!answer) { checked = false; break; }
+          if (/^\s*yes/i.test(String(answer))) { it.nsfw = 1; break; }
+        }
+        if (!frames) checked = false;
+      } catch (e) {
+        checked = false;
+        console.warn("gif frame check failed", id, String(e));
+      }
+    }
   }
   await env.DB.prepare("UPDATE items SET thumb_key = ?, alt = ?, nsfw = ?, width = ?, height = ? WHERE id = ?").bind(it.thumb_key, it.alt, it.nsfw, it.width ?? null, it.height ?? null, id).run();
   // a public image opens only once the sensitive content check has answered "no". If it flagged the image,

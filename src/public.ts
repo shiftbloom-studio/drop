@@ -5,7 +5,6 @@
  * by a rate limiter and per day by a counter in D1 that only ever sees a keyed hash of the address.
  * Pure helpers here; the routes live in index.ts.
  */
-import { INLINE_TYPES } from "./safety";
 import { sha256Hex } from "./util";
 
 /** Owner recorded for items uploaded without a token. No token's history ever includes them. */
@@ -60,14 +59,32 @@ export function publicExpiry(raw: string | null | undefined, now = Math.floor(Da
 }
 
 /**
- * Without a token, drop takes only what a browser can show passively: images, video, audio, PDF, plain text.
- * Icons are left out: they can wrap a PNG, but the sensitive content check only runs on the image types it reads.
+ * Without a token, drop only takes what it can check before the file goes public: still and animated
+ * images, which go through the sensitive content check (every frame of a GIF), and plain text. Video,
+ * audio, PDFs, icons and archives need a token. The file name has to match what the bytes say it is.
  */
-const PUBLIC_EXCLUDED = new Set(["image/x-icon"]);
-export const publicTypeAllowed = (mime: string) => {
-  const type = mime.toLowerCase().split(";")[0].trim();
-  return INLINE_TYPES.has(type) && !PUBLIC_EXCLUDED.has(type);
+export const PUBLIC_TYPES: Record<string, readonly string[]> = {
+  "image/png": ["png"],
+  "image/jpeg": ["jpg", "jpeg", "jpe", "jfif"],
+  "image/gif": ["gif"],
+  "image/webp": ["webp"],
+  "image/avif": ["avif"],
+  "image/bmp": ["bmp"],
+  "text/plain": ["txt", "text", "md", "markdown", "log", "csv", "tsv", "json", "yaml", "yml", "toml", "ini", "conf", "cfg", "srt", "vtt", "diff", "patch", ""],
 };
+const typeOf = (mime: string) => mime.toLowerCase().split(";")[0].trim();
+export const publicTypeAllowed = (mime: string) => Object.hasOwn(PUBLIC_TYPES, typeOf(mime));
+/** The extension of `name` fits the detected type. A name without an extension only passes for plain text. */
+export function publicNameMatches(name: string, mime: string): boolean {
+  const exts = PUBLIC_TYPES[typeOf(mime)];
+  const m = /\.([A-Za-z0-9]{1,12})$/.exec(name.trim());
+  return !!exts && exts.includes(m ? m[1].toLowerCase() : "");
+}
+/** Animated GIFs without a token: every frame is checked, so frames and size are capped. */
+export const PUBLIC_GIF_MAX_FRAMES = 120;
+export const PUBLIC_GIF_MAX_PIXELS = 4096 * 4096;
+/** Canvas pixels times frames: what decoding all frames costs. */
+export const PUBLIC_GIF_MAX_WORK = 80_000_000;
 
 /** UTC day number, the window of the daily cap. */
 export const utcDay = (now = Date.now()) => Math.floor(now / 86400000);
