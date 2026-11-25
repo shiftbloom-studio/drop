@@ -121,6 +121,10 @@ describe("public uploads on Node.js", () => {
     expect(row?.blocked === "checking" || row?.blocked === null).toBe(true);
     await drop.queue.idle();
     expect((await realFetch(j.url)).status).toBe(200);
+    // a cached copy that still says "checking" doesn't hold the link once D1 says the scan is done
+    const done = await drop.env.DB.prepare("SELECT * FROM items WHERE id = ?").bind(j.id).first<Record<string, unknown>>();
+    await drop.env.LINKS.put(`i:${j.id}`, JSON.stringify({ ...done, blocked: "checking" }));
+    expect((await realFetch(j.url)).status).toBe(200);
   });
 
   it("refuses failed checks, other actions, other types, big files and big pastes", async () => {

@@ -121,9 +121,12 @@ async function cacheItem(env: Env, it: Item) {
 async function getItem(env: Env, id: string): Promise<Item | null> {
   if (!/^[A-Za-z0-9]{3,16}$/.test(id)) return null;
   let it = await env.LINKS.get<Item>(`i:${id}`, { type: "json", cacheTtl: 60 });
-  if (!it) {
+  // KV keeps a copy at the edge for up to a minute, so a public upload still marked "checking" there is
+  // looked up in D1 again: otherwise its link would keep saying "still checking" long after the scan.
+  if (!it || it.blocked === CHECKING) {
+    const cached = it;
     it = await env.DB.prepare("SELECT * FROM items WHERE id = ?").bind(id).first<Item>();
-    if (it) await cacheItem(env, it);
+    if (it && !(cached && it.blocked === CHECKING)) await cacheItem(env, it);
   }
   if (it && it.expires_at && it.expires_at < Date.now() / 1000) return null;
   return it;
@@ -718,7 +721,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     const it = await getItem(env, v[1]);
     if (!it) return (await missLimited(req, env)) ?? notFound();
     const sub = v[2];
-    if (it.blocked === CHECKING) return new Response(checkingPage(), { status: 503, headers: { ...htmlHeaders("no-store"), "retry-after": "5" } });
+    if (it.blocked === CHECKING) return new Response(checkingPage(), { status: 503, headers: { ...htmlHeaders("no-store"), "retry-after": "5", refresh: "5" } });
     if (it.blocked) return new Response(heldPage(), { status: 451, headers: htmlHeaders("no-store") });
     // "/id.png" (ShareX-style direct link) behaves like /id/raw
     const direct = !sub && path.includes(".");
