@@ -1,3 +1,4 @@
+import { bloomSvg, faviconSvg } from "./bloom";
 import type { Item } from "./index";
 
 /* drop — UI following the shiftbloom studio brand book v2.
@@ -21,40 +22,14 @@ const VIEW_JS = `document.querySelectorAll('time[datetime]').forEach(function(t)
 var c=document.getElementById('cplink');if(c)c.onclick=function(){navigator.clipboard.writeText(c.dataset.u).then(function(){c.textContent='Copied';setTimeout(function(){c.textContent='Copy link'},1600)},function(){})};
 var v=document.getElementById('unveil');if(v)v.onclick=function(){document.getElementById('v').classList.remove('veil');v.remove()};`;
 
-// ---------- the Bloom, drawn from the construction spec ----------
-// rings: [radius, petals, rotation offset, width factor, gradient stem -> tip]
-const RINGS: [number, number, number, number, string, string][] = [
-  [100, 10, 0, 0.3, "#D8163F", "#FF2E52"],
-  [74, 10, 18, 0.32, "#FF2E52", "#FF7E9E"],
-  [50, 8, 22.5, 0.36, "#FF7E9E", "#FFC2D3"],
-  [27, 6, 0, 0.44, "#FFB4CA", "#FFDCE7"],
-];
-const petal = (r: number, wf: number) => {
-  const w = r * wf;
-  const f = (n: number) => +n.toFixed(2);
-  return `M0 0C${f(w)} ${f(-0.32 * r)} ${f(0.62 * w)} ${f(-0.74 * r)} 0 ${-r}C${f(-0.62 * w)} ${f(-0.74 * r)} ${f(-w)} ${f(-0.32 * r)} 0 0Z`;
-};
-
-/** Full-gradient bloom (≥32px) or solid bloom (<32px, favicon). `anim` adds ring classes for motion. */
-export function bloom(opts: { size?: number; solid?: boolean; id?: string; anim?: boolean; cls?: string } = {}) {
-  const { size = 64, solid = false, id = "b", anim = false, cls = "" } = opts;
-  let defs = "", rings = "";
-  RINGS.forEach(([r, n, off, wf, c0, c1], i) => {
-    const gid = `${id}g${i}`;
-    if (!solid) defs += `<linearGradient id="${gid}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="${-r}"><stop offset="0" stop-color="${c0}"/><stop offset="1" stop-color="${c1}"/></linearGradient>`;
-    const d = petal(r, wf);
-    let ps = "";
-    for (let k = 0; k < n; k++) ps += `<path d="${d}" transform="rotate(${+(off + (360 / n) * k).toFixed(2)})"/>`;
-    const fill = solid ? (i === 0 || i === 1 ? "#FF2E52" : "none") : `url(#${gid})`;
-    if (fill !== "none") rings += `<g fill="${fill}"${anim ? ` class="ring r${i}"` : ""}>${ps}</g>`;
-  });
-  const seed = `<circle r="7" fill="${solid ? "#C81040" : "#FF2E52"}"/>`;
-  return `<svg class="bloom ${cls}" width="${size}" height="${size}" viewBox="-104 -104 208 208" role="img" aria-label="shiftbloom bloom">${defs ? `<defs>${defs}</defs>` : ""}${rings}${seed}</svg>`;
+// ---------- the Bloom: the exact mark from shiftbloom.studio (see ./bloom.ts) ----------
+/** Gradient bloom by default, as in the shiftbloom.studio header; `solid` for favicons. */
+export function bloom(opts: { size?: number; solid?: boolean; id?: string; cls?: string } = {}) {
+  const { size = 30, solid = false, id = "sb-bloom-ring", cls = "" } = opts;
+  return bloomSvg({ size, variant: solid ? "solid" : "gradient", id, cls: `bloom ${cls}`.trim() });
 }
 
-export function faviconSvg() {
-  return `<svg xmlns="http://www.w3.org/2000/svg"${bloom({ size: 32, solid: true }).slice(4)}`;
-}
+export { faviconSvg };
 
 const SPARK = (size: number, color = "#FF2E52") =>
   `<svg width="${size}" height="${size}" viewBox="-12 -12 24 24" aria-hidden="true"><path d="M0-12C1 -3 3 -1 12 0C3 1 1 3 0 12C-1 3-3 1-12 0C-3-1-1-3 0-12Z" fill="${color}"/></svg>`;
@@ -76,8 +51,8 @@ a:hover{background-size:100% 1px}
 .label.red{color:var(--root)}
 .mono{font-family:var(--mono)}
 .top{display:flex;align-items:center;justify-content:space-between;padding:22px 0;border-bottom:1px solid var(--line)}
-.brand{display:flex;align-items:center;gap:10px;color:var(--ink);background:none}
-.brand .word{font:600 22px/1 var(--display);letter-spacing:-.02em}
+.brand{display:flex;align-items:center;gap:12px;color:var(--ink);background:none}
+.brand .word{font:600 20px/1 var(--display);letter-spacing:-.02em}@media(min-width:640px){.brand .word{font-size:22.4px}}
 .brand .word i{font-style:normal;color:var(--bloom)}
 h1,h2{font-family:var(--display);font-weight:600;letter-spacing:-.025em;line-height:1.02;margin:0}
 h1{font-size:clamp(40px,6.4vw,72px)}h1 em{font-style:normal;color:var(--bloom)}
@@ -93,7 +68,7 @@ input:focus,textarea:focus,select:focus{outline:0;border-color:var(--bloom);box-
 textarea{min-height:200px;font:13px/1.6 var(--mono);resize:vertical}
 .panel{background:var(--warm);border-radius:20px;padding:clamp(18px,3vw,32px)}
 .seedlist{list-style:none;padding:0;margin:0}.seedlist li{position:relative;padding-left:18px}.seedlist li:before{content:"";position:absolute;left:2px;top:.68em;width:7px;height:7px;border-radius:50%;background:var(--bloom)}
-.foot{display:flex;justify-content:space-between;gap:12px 24px;flex-wrap:wrap;padding:22px 0 30px;margin-top:72px;border-top:1px solid var(--line)}.foot .sb{color:var(--ink);background:none;font-weight:600}.foot .sb i{font-style:normal;color:var(--bloom)}.foot p{margin:0;font-size:14px;color:var(--ink60)}
+.foot{display:flex;justify-content:space-between;gap:12px 24px;flex-wrap:wrap;padding:22px 0 30px;margin-top:72px;border-top:1px solid var(--line)}.foot .sb,.who .sb{font-family:var(--display);letter-spacing:-.02em}.sb .studio{font-weight:400;color:var(--ink60)}.foot .sb{color:var(--ink);background:none;font-weight:600}.foot .sb i{font-style:normal;color:var(--bloom)}.foot p{margin:0;font-size:14px;color:var(--ink60)}
 .unfold{animation:unfold .6s var(--ease) both}
 @keyframes unfold{from{opacity:0;transform:scale(.6)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
@@ -103,7 +78,7 @@ const head = (title: string, extra = "", index = false, lang = "en") => `<!docty
 <title>${esc(title)}</title>${index ? "" : `<meta name="robots" content="noindex">`}<meta name="theme-color" content="#ffffff">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/fonts.css">${extra}<style>${css}`;
 
-const topbar = (right = "") => `<header class="top"><a class="brand" href="/" aria-label="drop — shiftbloom studio">${bloom({ size: 28, solid: true })}<span class="word">drop<i>.</i></span></a>${right}</header>`;
+const topbar = (right = "") => `<header class="top"><a class="brand" href="/" aria-label="drop — shiftbloom studio">${bloom({ size: 30 })}<span class="word">drop<i>.</i></span></a>${right}</header>`;
 
 /** AGPL §13: users interacting over a network must be offered the source. Forks: point this at your repo. */
 export const SOURCE_URL = "https://github.com/shiftbloom-studio/drop";
@@ -112,7 +87,7 @@ export const SOURCE_URL = "https://github.com/shiftbloom-studio/drop";
 let UI: { legal: boolean; abuseEmail: string | null } = { legal: false, abuseEmail: null };
 export function configureUi(c: typeof UI) { UI = c; }
 
-const footer = (lang: "en" | "de" = "en") => `<footer class="foot"><p>${lang === "de" ? "drop ist Open Source unter AGPL-3.0." : "drop is open source under AGPL-3.0."} <a href="${SOURCE_URL}">${lang === "de" ? "Zum Code" : "Read the code"}</a>${UI.legal ? (lang === "de" ? ` · <a href="/datenschutz">Datenschutz</a> · <a href="/impressum">Impressum</a>` : ` · <a href="/privacy">Privacy</a> · <a href="/imprint">Imprint</a>`) : ""}</p><p><a class="sb" href="https://shiftbloom.studio">shiftbloom studio<i>.</i></a> · hamburg</p></footer>`;
+const footer = (lang: "en" | "de" = "en") => `<footer class="foot"><p>${lang === "de" ? "drop ist Open Source unter AGPL-3.0." : "drop is open source under AGPL-3.0."} <a href="${SOURCE_URL}">${lang === "de" ? "Zum Code" : "Read the code"}</a>${UI.legal ? (lang === "de" ? ` · <a href="/datenschutz">Datenschutz</a> · <a href="/impressum">Impressum</a>` : ` · <a href="/privacy">Privacy</a> · <a href="/imprint">Imprint</a>`) : ""}</p><p><a class="sb" href="https://shiftbloom.studio">shiftbloom <span class="studio">studio</span><i>.</i></a> · hamburg</p></footer>`;
 
 // ---------- landing ----------
 const SITE_TITLE = "drop. · shiftbloom studio";
@@ -207,7 +182,7 @@ td.undo{color:var(--ink60);padding:18px 8px}
 @media (max-width:760px){.hero{grid-template-columns:1fr;align-items:start}td.m,th.m{display:none}.mm{display:block}}
 </style></head><body>
 <div class="wrap">
-${topbar(`<div class="who"><span class="member">token saved</span><span class="member" aria-hidden="true">·</span><button class="lnk member" id="logout" type="button">Forget token</button><a class="sb anon" href="https://shiftbloom.studio">shiftbloom studio<i>.</i></a></div>`)}
+${topbar(`<div class="who"><span class="member">token saved</span><span class="member" aria-hidden="true">·</span><button class="lnk member" id="logout" type="button">Forget token</button><a class="sb anon" href="https://shiftbloom.studio">shiftbloom <span class="studio">studio</span><i>.</i></a></div>`)}
 <section class="hero">
   <div><span class="label member" id="stats"></span>
   <h1 style="margin-top:14px">Every file gets five characters<em>.</em></h1>
@@ -419,7 +394,7 @@ body{width:1200px;height:630px;overflow:hidden}
 .card h1{font-size:76px;line-height:1.02;max-width:15em}
 .card .u{display:inline-block;background:var(--warm);border-radius:18px;padding:20px 26px;font:500 30px/1 var(--mono)}.card .u b{color:var(--root);font-weight:600}
 </style></head><body><div class="card">
-<div style="display:flex;align-items:center;gap:12px">${bloom({ size: 34, solid: true })}<span style="font:600 28px/1 var(--display);letter-spacing:-.02em">drop<span style="color:var(--bloom)">.</span></span></div>
+<div style="display:flex;align-items:center;gap:12px">${bloom({ size: 34, id: "og-bloom" })}<span style="font:600 28px/1 var(--display);letter-spacing:-.02em">drop<span style="color:var(--bloom)">.</span></span></div>
 <h1>Every file gets five characters<em>.</em></h1>
 <div><span class="u">drop.shiftbloom.studio/<b>aB3dE</b></span></div>
 </div></body></html>`;
