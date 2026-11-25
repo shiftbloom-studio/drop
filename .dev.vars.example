@@ -1,0 +1,4 @@
+# Copy to .dev.vars for `npm run dev`. Never commit .dev.vars.
+# Token required for uploads and the /api/* routes. Generate one with:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+API_TOKEN=change-me

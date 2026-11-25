@@ -1,12 +1,17 @@
+// drop — Cloudflare Workers config.
+// Before the first deploy, create the resources (see README → "Self-hosting") and
+// replace the two <placeholders> below with the IDs Wrangler prints.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "drop",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
-  "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": false,
-  "routes": [{ "pattern": "drop.shiftbloom.studio", "custom_domain": true }],
   "observability": { "enabled": true },
+
+  // Serve on your own (sub)domain. The zone must be on the same Cloudflare account.
+  // "routes": [{ "pattern": "drop.example.com", "custom_domain": true }],
+  // "workers_dev": false,
+
   "vars": { "MAX_MULTIPART_MB": "95", "MAX_STREAM_MB": "500" },
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "drop-files" }],
   "d1_databases": [{ "binding": "DB", "database_name": "drop-db", "database_id": "<your-d1-database-id>", "migrations_dir": "migrations" }],
@@ -15,8 +20,9 @@
     "producers": [{ "binding": "JOBS", "queue": "drop-jobs" }],
     "consumers": [{ "queue": "drop-jobs", "max_batch_size": 5, "max_retries": 3 }]
   },
+  // Optional: remove these two to run without thumbnails / AI alt text.
   "ai": { "binding": "AI" },
   "images": { "binding": "IMAGES" },
   "triggers": { "crons": ["17 * * * *"] }
-  // secret: API_TOKEN (wrangler secret put API_TOKEN)
+  // Secret (not in this file): API_TOKEN → `npx wrangler secret put API_TOKEN`
 }

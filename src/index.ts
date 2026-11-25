@@ -4,6 +4,7 @@
  * Background: Queue consumer builds thumbnails (Images binding) and alt text + NSFW flag (Workers AI).
  */
 import { landingPage, viewPage, notFoundPage, handleAsset } from "./ui.js";
+import { THUMB_TYPES, randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, sanitizeName } from "./util";
 
 export interface Env {
   FILES: R2Bucket;
@@ -38,53 +39,10 @@ export interface Item {
 }
 type Job = { type: "analyze"; id: string };
 
-const ID_ALPHABET = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const THUMB_TYPES = /^image\/(jpeg|png|gif|webp|avif|bmp|tiff)$/;
-const EXPIRY: Record<string, number> = { "10m": 600, "1h": 3600, "1d": 86400, "7d": 604800, "30d": 2592000, "90d": 7776000, "1y": 31536000 };
-
 // ---------- helpers ----------
 const json = (data: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(data, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", ...headers } });
 const err = (status: number, message: string) => json({ error: message }, status);
-
-function randomString(len: number, alphabet = ID_ALPHABET) {
-  const bytes = crypto.getRandomValues(new Uint8Array(len));
-  let out = "";
-  for (const b of bytes) out += alphabet[b % alphabet.length];
-  return out;
-}
-
-function timingSafeEqual(a: string, b: string) {
-  const ea = new TextEncoder().encode(a), eb = new TextEncoder().encode(b);
-  if (ea.length !== eb.length) return false;
-  let diff = 0;
-  for (let i = 0; i < ea.length; i++) diff |= ea[i] ^ eb[i];
-  return diff === 0;
-}
-
-function isAuthed(req: Request, env: Env) {
-  if (!env.API_TOKEN) return false;
-  const h = req.headers.get("authorization") || "";
-  const token = h.startsWith("Bearer ") ? h.slice(7) : req.headers.get("x-api-key") || new URL(req.url).searchParams.get("token") || "";
-  return token.length > 0 && timingSafeEqual(token, env.API_TOKEN);
-}
-
-function parseExpiry(v: string | null | undefined): number | null | undefined {
-  if (!v || v === "never" || v === "0") return null;
-  if (v in EXPIRY) return Math.floor(Date.now() / 1000) + EXPIRY[v];
-  const m = /^(\d+)([mhdw])$/.exec(v);
-  if (m) return Math.floor(Date.now() / 1000) + Number(m[1]) * { m: 60, h: 3600, d: 86400, w: 604800 }[m[2] as "m"];
-  return undefined; // invalid
-}
-
-function extOf(name: string | null) {
-  const m = /\.([a-z0-9]{1,8})$/i.exec(name || "");
-  return m ? m[1].toLowerCase() : "";
-}
-
-function sanitizeName(name: string) {
-  return name.replace(/[\u0000-\u001f\/\\"]/g, "_").slice(0, 200) || "file";
-}
 
 function baseUrl(req: Request) {
   return new URL(req.url).origin;
@@ -429,7 +387,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (path === "/health") return json({ ok: true });
 
   if (path.startsWith("/api/")) {
-    if (!isAuthed(req, env)) return err(401, "unauthorized: send Authorization: Bearer <token>");
+    if (!isAuthed(req, env.API_TOKEN)) return err(401, "unauthorized: send Authorization: Bearer <token>");
     if (path === "/api/upload" && (m === "POST" || m === "PUT")) return handleUpload(req, env, ctx);
     if (path === "/api/paste" && m === "POST") return handlePaste(req, env);
     if (path === "/api/shorten" && m === "POST") return handleShorten(req, env);

@@ -1,93 +1,149 @@
-# drop
+# drop.
 
-ShareX-compatible file host, pastebin and URL shortener on Cloudflare Workers. Live at **https://drop.shiftbloom.studio**.
+**A tiny, self-hostable file host, pastebin and URL shortener on Cloudflare Workers.** ShareX-compatible, with expiring links, thumbnails and AI alt text.
 
-- **Uploads** (images, video, any file) stored in R2, with view pages, raw links, range requests (video seeking) and Discord/OG embeds
-- **Pastes** with syntax highlighting and raw view
-- **Short links** with 302 redirects
-- **Expiry** per item (`10m`, `1h`, `1d`, `7d`, `30d`, `90d`, `1y`, `never` or e.g. `12h`), cleaned up hourly by a cron trigger
-- **Thumbnails** via the Images binding and **alt text + NSFW flag** via Workers AI, generated in the background through a Queue
-- **Deletion URLs** per item (ShareX "Deletion URL" works out of the box)
-- Web UI at `/` for drag & drop, Ctrl+V paste, pastes, shortening and a list of recent items
+Runs at [drop.shiftbloom.studio](https://drop.shiftbloom.studio). Made by [shiftbloom studio](https://shiftbloom.studio). MIT licensed.
 
-Uploads and the API need the API token; viewing is public for anyone with the link.
+- **Uploads**: images, video and any file, stored in R2. Each upload gets a view page, a raw link, a download link, range requests for video seeking, and OpenGraph/Discord embeds.
+- **Pastes**: syntax highlighting and a raw view.
+- **Short links**: 302 redirects.
+- **Expiry** per item (`10m`, `1h`, `1d`, `7d`, `30d`, `90d`, `1y`, `never` or a custom value like `12h`/`3d`/`2w`). An hourly cron removes expired items.
+- **Thumbnails** through the Images binding, and **alt text plus an NSFW flag** through Workers AI. Both run in the background through a Queue.
+- **Deletion URLs** per item, so the ShareX "Deletion URL" works out of the box.
+- **Web UI** with drag & drop, Ctrl+V paste, pastes, shortening and a list of recent items.
+- **Privacy**: fonts and highlight.js are proxied through the worker, so visitors never contact third-party CDNs. `robots.txt` and `noindex` keep items out of search engines.
 
-## Cloudflare resources
+Uploading and every `/api/*` route need the API token. Viewing an item is public for anyone who has its link.
 
-| Binding | Type | Name |
-| --- | --- | --- |
-| `FILES` | R2 bucket | `drop-files` (`f/<id>/<name>`, `p/<id>.txt`, `t/<id>.webp`) |
-| `DB` | D1 | `drop-db` (table `items`, source of truth) |
-| `LINKS` | KV | `drop-links` (hot cache `i:<id>`, TTL = expiry) |
-| `JOBS` | Queue | `drop-jobs` (thumbnail + AI analysis) |
-| `AI` | Workers AI | `@cf/moondream/moondream3.1-9B-A2B` (override with `AI_MODEL`) |
-| `IMAGES` | Images | thumbnail transforms |
-| `API_TOKEN` | secret | upload/API auth |
+## Architecture
 
-Cron: `17 * * * *` deletes expired items from R2, KV and D1.
+```
+ShareX / curl / browser
+        │
+        ▼
+Worker "drop"  ── index.js (API, routing)  +  ui.js (pages, Bloom SVG, asset proxy)
+   │      │        │         │
+   R2     D1       KV        Queue ──► consumer (same worker)
+ files   items   hot cache    │
+ thumbs  (truth) (i:<id>)     ├─ Images binding → 480px WebP thumbnail
+                              └─ Workers AI (moondream) → alt text + NSFW flag
+Cron (hourly) → delete expired items from R2, KV and D1
+```
+
+| Binding | Type | Default name | Purpose |
+| --- | --- | --- | --- |
+| `FILES` | R2 bucket | `drop-files` | `f/<id>/<name>`, `p/<id>.txt`, `t/<id>.webp` |
+| `DB` | D1 | `drop-db` | `items` table, source of truth |
+| `LINKS` | KV | any | cache `i:<id>`, TTL = expiry |
+| `JOBS` | Queue | `drop-jobs` | thumbnail + AI jobs |
+| `AI` | Workers AI | – | optional, `AI_MODEL` overrides `@cf/moondream/moondream3.1-9B-A2B` |
+| `IMAGES` | Images | – | optional, thumbnails |
+| `API_TOKEN` | secret | – | upload/API auth |
+| `MAX_MULTIPART_MB` / `MAX_STREAM_MB` | vars | `95` / `500` | upload limits |
+
+## Self-hosting
+
+You need a Cloudflare account with Workers Paid, which Queues require. R2, D1 and KV are enabled on the account.
+
+```sh
+git clone https://github.com/shiftbloom-studio/drop && cd drop
+npm install
+npx wrangler login
+
+# 1. create resources and paste the printed IDs into wrangler.jsonc
+npx wrangler r2 bucket create drop-files
+npx wrangler d1 create drop-db              # → database_id
+npx wrangler kv namespace create LINKS      # → id
+npx wrangler queues create drop-jobs
+
+# 2. schema + secret
+npm run db:migrate
+npx wrangler secret put API_TOKEN           # use a long random string
+
+# 3. optional: uncomment "routes" in wrangler.jsonc for your own domain
+npm run deploy
+```
+
+Without a custom domain the worker answers on `drop.<your-subdomain>.workers.dev`. To run without AI or thumbnails, remove the `ai`/`images` bindings. Everything else keeps working.
+
+### Deploy from GitHub Actions
+
+`.github/workflows/deploy.yml` deploys on manual dispatch. Add these repository secrets: `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers" plus D1/R2/Queues edit) and `CLOUDFLARE_ACCOUNT_ID`.
+
+## Local development
+
+```sh
+cp .dev.vars.example .dev.vars              # set API_TOKEN
+npx wrangler d1 migrations apply drop-db --local
+npm run dev                                 # http://localhost:8787
+npm run check                               # typecheck + tests + build
+```
+
+Workers AI and Images need a Cloudflare connection. Locally they fail gracefully, so uploads work and only the thumbnail and alt text are missing.
 
 ## API
 
-All `/api/*` routes need `Authorization: Bearer <token>` (or `X-API-Key`).
+All `/api/*` routes need `Authorization: Bearer <token>`. `X-API-Key: <token>` also works.
 
 | Method | Path | Body | Notes |
 | --- | --- | --- | --- |
-| `POST` | `/api/upload` | multipart `file` (+ optional `expires`) | up to `MAX_MULTIPART_MB` (95) |
-| `PUT` | `/api/upload?filename=x.mp4` | raw bytes | streamed to R2, up to `MAX_STREAM_MB` (500) |
+| `POST` | `/api/upload` | multipart `file` (+ optional `expires`) | up to `MAX_MULTIPART_MB` |
+| `PUT` | `/api/upload?filename=x.mp4` | raw bytes | streamed to R2, up to `MAX_STREAM_MB` |
 | `POST` | `/api/paste` | JSON `{content, lang, title, expires}`, form `content`, or raw text | |
 | `POST` | `/api/shorten` | JSON `{url, expires}`, form `url`, or raw text | |
-| `GET` | `/api/list?limit=50&kind=file` | | recent items + stats |
-| `GET/DELETE` | `/api/items/:id` | | `POST ?reanalyze` re-queues AI |
-| `GET` | `/api/sharex?type=upload\|paste\|shorten` | | downloads a ready `.sxcu` |
+| `GET` | `/api/list?limit=50&kind=file` | | recent items + totals |
+| `GET` / `DELETE` | `/api/items/:id` | | `POST /api/items/:id?reanalyze` re-queues AI |
+| `GET` | `/api/sharex?type=upload\|paste\|shorten` | | ready-made `.sxcu` |
 
-Expiry can also be sent as `X-Expires` header. Responses:
+You can also send the expiry as an `X-Expires` header. Response:
 
 ```json
-{ "id": "aB3dE", "url": "https://drop.shiftbloom.studio/aB3dE", "raw": ".../aB3dE/raw.png",
-  "thumbnail": ".../aB3dE/thumb", "delete": ".../d/aB3dE/<token>", "expires_at": null }
+{ "id": "aB3dE", "kind": "file", "url": "https://drop.example.com/aB3dE",
+  "raw": "https://drop.example.com/aB3dE/raw.png", "thumbnail": "https://drop.example.com/aB3dE/thumb",
+  "delete": "https://drop.example.com/d/aB3dE/<delete-token>", "expires_at": null }
 ```
 
-Public routes: `/:id` (view page / redirect), `/:id/raw`, `/:id.ext` (direct), `/:id/dl` (download), `/:id/thumb`, `/d/:id/:deleteToken`.
+Public routes: `/:id` (view page or redirect), `/:id/raw`, `/:id.ext` (direct link), `/:id/dl`, `/:id/thumb`, `/d/:id/:deleteToken`.
 
-## ShareX
+### ShareX
 
-Open https://drop.shiftbloom.studio, enter the token and click *Upload-Config* / *Paste-Config* / *Shortener-Config*, then double-click the `.sxcu` files. Or:
+Open your instance, enter the token and click *upload-config*, *paste-config* or *shortener-config*. Then double-click the downloaded `.sxcu` files. Or from a shell:
 
 ```sh
-curl -H "Authorization: Bearer $DROP_TOKEN" "https://drop.shiftbloom.studio/api/sharex?type=upload" -o drop.sxcu
+curl -H "Authorization: Bearer $DROP_TOKEN" "https://drop.example.com/api/sharex?type=upload" -o drop.sxcu
 ```
 
-## CLI examples
+### curl
 
 ```sh
-curl -H "Authorization: Bearer $DROP_TOKEN" -F file=@shot.png https://drop.shiftbloom.studio/api/upload
-cat log.txt | curl -H "Authorization: Bearer $DROP_TOKEN" --data-binary @- "https://drop.shiftbloom.studio/api/paste?lang=log&expires=7d"
-curl -H "Authorization: Bearer $DROP_TOKEN" -d url=https://example.com https://drop.shiftbloom.studio/api/shorten
+curl -H "Authorization: Bearer $DROP_TOKEN" -F file=@shot.png https://drop.example.com/api/upload
+cat log.txt | curl -H "Authorization: Bearer $DROP_TOKEN" --data-binary @- "https://drop.example.com/api/paste?lang=log&expires=7d"
+curl -H "Authorization: Bearer $DROP_TOKEN" -d url=https://example.com https://drop.example.com/api/shorten
 ```
+
+## Security model
+
+- A single shared API token protects uploads. Treat `.sxcu` files like passwords. Rotate the token with `wrangler secret put API_TOKEN`.
+- HTML, JS and SVG uploads are served with `Content-Security-Policy: sandbox`, and HTML/JS are served as `text/plain`, so uploads never run script on your origin.
+- Delete tokens and the API token are compared in constant time.
+- Rate limiting, WAF and bot rules belong in your Cloudflare zone, not in this code.
+
+Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 
 ## Design
 
-The UI follows the shiftbloom studio brand book v2: paper and ink with Bloom Red (`#FF2E52`) as the only accent, the Bloom mark drawn as SVG from the construction spec (4 rings + seed, gradients only inside the mark), Clash Display / General Sans / JetBrains Mono, and the Bloom Ease (`cubic-bezier(.22,1.1,.36,1)`) for motion. Fonts and highlight.js are proxied and cached through `/assets/*`, so visitors never hit third-party CDNs.
+The UI follows the shiftbloom studio brand book: white paper and ink, Bloom Red `#FF2E52` as the only accent, and the Bloom mark drawn as SVG from its construction spec. Type is set in Clash Display, General Sans and JetBrains Mono. Motion uses the Bloom Ease `cubic-bezier(.22,1.1,.36,1)`. When you fork, you are welcome to restyle `src/html.ts`.
 
-`src/ui.ts` (pages + assets) ships as its own module `ui.js`, separate from the API code in `index.js`.
-
-## Development
-
-```sh
-npm install
-npm run typecheck
-npx wrangler d1 migrations apply drop-db --local
-npm run dev
-npm run deploy           # needs CLOUDFLARE_API_TOKEN
-npx wrangler secret put API_TOKEN
-```
-
-## Security notes
-
-- HTML/JS/SVG uploads are served with `Content-Security-Policy: sandbox` and HTML/JS as `text/plain`, so uploads can't run script on this origin.
-- Delete tokens and the API token are compared in constant time.
-- `robots.txt` disallows indexing; view pages carry `noindex`.
+`src/ui.ts` ships as its own module (`ui.js`), so you can change the look without touching the API code.
 
 ## Costs
 
-R2 storage ($0.015/GB-month, no egress), D1/KV reads are tiny per request, one Queue message plus two Workers AI calls per image upload. Turn off AI by removing the `ai` binding.
+Expect a few cents a month for personal use. R2 storage costs $0.015/GB-month with no egress fees. Each image upload uses one queue message and two small Workers AI calls. D1 and KV traffic is a handful of operations per request.
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## License
+
+[MIT](LICENSE) © shiftbloom studio and contributors

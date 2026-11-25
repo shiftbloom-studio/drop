@@ -1,0 +1,43 @@
+import { describe, expect, it } from "vitest";
+import { bloom, faviconSvg, landingPage, notFoundPage, viewPage } from "../src/html";
+import type { Item } from "../src/index";
+
+const item = (over: Partial<Item> = {}): Item => ({
+  id: "aB3dE", kind: "file", r2_key: "f/aB3dE/x.png", name: "x.png", mime: "image/png", size: 2048, target: null, lang: null,
+  created_at: 1_790_000_000, expires_at: null, delete_token: "t", thumb_key: null, alt: null, nsfw: null, views: 0, ...over,
+});
+const links = { url: "https://drop.test/aB3dE", raw: "https://drop.test/aB3dE/raw.png", thumbnail: null };
+
+describe("bloom mark", () => {
+  it("draws 34 petals and a seed from the construction spec", () => {
+    const svg = bloom({ size: 64, id: "t" });
+    expect(svg.match(/<path /g)).toHaveLength(10 + 10 + 8 + 6);
+    expect(svg).toContain('<circle r="7" fill="#FF2E52"/>');
+    expect(svg.match(/<linearGradient/g)).toHaveLength(4);
+  });
+  it("uses the solid variant for the favicon", () => {
+    const fav = faviconSvg();
+    expect(fav.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true);
+    expect(fav).not.toContain("linearGradient");
+  });
+});
+
+describe("pages", () => {
+  it("escapes user-controlled names", () => {
+    const html = viewPage(item({ name: '<img src=x onerror=alert(1)>.png' }), links, null);
+    expect(html).not.toContain("<img src=x onerror");
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;.png");
+  });
+  it("escapes paste content", () => {
+    const html = viewPage(item({ kind: "paste", mime: "text/plain", lang: "html" }), links, "</script><script>alert(1)</script>");
+    expect(html).not.toContain("</script><script>alert(1)");
+  });
+  it("hides og:image for flagged images", () => {
+    expect(viewPage(item(), links, null)).toContain("og:image");
+    expect(viewPage(item({ nsfw: 1 }), links, null)).not.toContain("og:image");
+  });
+  it("renders landing and 404", () => {
+    expect(landingPage("drop.test")).toContain("drop.test");
+    expect(notFoundPage()).toContain("404");
+  });
+});
