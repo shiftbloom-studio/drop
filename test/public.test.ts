@@ -52,7 +52,7 @@ describe("public upload rules", () => {
   });
   it("adds public upload sections to the legal pages only when on", () => {
     const l = { name: "N", street: "S", city: "C", country: { en: "E", de: "D" }, email: "e@example.com", authority: "A" };
-    for (const kind of ["privacy", "datenschutz", "imprint", "impressum"] as const) {
+    for (const kind of ["privacy", "datenschutz", "imprint", "impressum", "terms", "nutzungsbedingungen", "content-policy", "inhaltsrichtlinie"] as const) {
       const on = legalPage(kind, l, { malwareLookup: false, abuseEmail: "abuse@example.com", public: true });
       const off = legalPage(kind, l, { malwareLookup: false, abuseEmail: "abuse@example.com" });
       expect(on).toMatch(/12 (hours|Stunden)/);

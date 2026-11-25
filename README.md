@@ -262,6 +262,8 @@ With `PUBLIC_UPLOADS=on` and both Turnstile keys set, visitors without a token c
 
 Set `LEGAL` (JSON with `name`, optional `business`, `street`, `city`, `country.en`, `country.de`, `email`, optional `phone` and `vatId`, `authority`) to publish an imprint and a privacy policy in English and German at `/imprint`, `/impressum`, `/privacy` and `/datenschutz`. Set `ABUSE_EMAIL` to show "Report this file" on item pages. The privacy policy describes what this code does; check it against your own setup before you publish it.
 
+The same setting also publishes terms of use at `/terms` and `/nutzungsbedingungen` and a content policy at `/content-policy` and `/inhaltsrichtlinie`. They are written for an operator in Germany: drop as a hosting service under the Digital Services Act (Art. 6), notices under Art. 16 DSA, and `ABUSE_EMAIL` (or the `LEGAL` email) as the point of contact under Art. 11 and 12 DSA. The upload box and the footer link to them. They aren't legal advice, so have them checked for your own instance.
+
 Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 
 ## Design
