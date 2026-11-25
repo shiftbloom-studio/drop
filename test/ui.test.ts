@@ -67,6 +67,42 @@ describe("pages", () => {
     expect(legalPage("privacy", l, { malwareLookup: false, abuseEmail: null })).not.toContain("MalwareBazaar");
     expect(legalPage("imprint", l, { malwareLookup: false, abuseEmail: null })).toContain("§ 5 DDG");
   });
+  it("renders terms and content policy in both languages with DSA notice and contact", () => {
+    const l = { name: "Ada <Admin>", street: "Street 1", city: "12345 Town", country: { en: "Germany", de: "Deutschland" }, email: "a@example.com", authority: "Some Authority" };
+    const o = { malwareLookup: true, abuseEmail: "abuse@example.com" };
+    const terms = legalPage("terms", l, o), nb = legalPage("nutzungsbedingungen", l, o);
+    const cp = legalPage("content-policy", l, o), ir = legalPage("inhaltsrichtlinie", l, o);
+    expect(terms).toContain('<html lang="en">');
+    expect(nb).toContain('<html lang="de">');
+    expect(terms).toContain("Ada &lt;Admin&gt;");
+    expect(terms).not.toContain("Ada <Admin>");
+    expect(terms).toContain("Art. 11 and 12 DSA");
+    expect(nb).toContain("Art. 11 und 12 DSA");
+    for (const html of [terms, nb]) {
+      expect(html).toContain("Art. 6");
+      expect(html).toContain("mailto:abuse@example.com");
+    }
+    for (const html of [cp, ir]) {
+      expect(html).toContain("Art. 16 DSA");
+      expect(html).toContain("Art. 18 DSA");
+      expect(html).toContain("mailto:abuse@example.com");
+    }
+    expect(cp).toContain('id="report"');
+    expect(ir).toContain('id="melden"');
+    expect(legalPage("terms", l, { malwareLookup: false, abuseEmail: null })).toContain("mailto:a@example.com");
+    expect(legalPage("content-policy", l, { malwareLookup: false, abuseEmail: null })).not.toContain("known malware");
+  });
+  it("links the terms from the upload box and footer only when legal pages exist", async () => {
+    const { configureUi } = await import("../src/html");
+    configureUi({ legal: true, abuseEmail: null });
+    const on = landingPage("drop.test");
+    expect(on).toContain("By uploading you accept the");
+    expect(on).toContain('href="/content-policy"');
+    configureUi({ legal: false, abuseEmail: null });
+    const off = landingPage("drop.test");
+    expect(off).not.toContain("By uploading you accept the");
+    expect(off).not.toContain('href="/terms"');
+  });
   it("asks before deleting", () => {
     expect(deletePage("x.png", false)).toContain('<form method="post">');
     expect(deletePage("<b>", false)).toContain("&lt;b&gt;");

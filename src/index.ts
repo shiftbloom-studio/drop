@@ -370,8 +370,9 @@ async function missLimited(req: Request, env: Env) {
   return null;
 }
 
-const LEGAL_PATHS: Record<string, "privacy" | "datenschutz" | "imprint" | "impressum"> = {
+const LEGAL_PATHS: Record<string, "privacy" | "datenschutz" | "imprint" | "impressum" | "terms" | "nutzungsbedingungen" | "content-policy" | "inhaltsrichtlinie"> = {
   "/privacy": "privacy", "/datenschutz": "datenschutz", "/imprint": "imprint", "/impressum": "impressum",
+  "/terms": "terms", "/nutzungsbedingungen": "nutzungsbedingungen", "/content-policy": "content-policy", "/inhaltsrichtlinie": "inhaltsrichtlinie",
 };
 export type Legal = { name: string; business?: string; street: string; city: string; country: { en: string; de: string }; email: string; phone?: string; vatId?: string; authority: string };
 function parseLegal(raw?: string): Legal | null {
