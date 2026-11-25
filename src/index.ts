@@ -1,5 +1,5 @@
 /**
- * drop — ShareX-compatible file host, pastebin and URL shortener on Cloudflare Workers
+ * drop - ShareX-compatible file host, pastebin and URL shortener on Cloudflare Workers
  * (or on Node.js through src/node, which provides the same bindings backed by disk and SQLite).
  * Storage: R2 (blobs + thumbnails), D1 (metadata, source of truth), KV (hot lookup cache for short ids).
  * Background: Queue consumer builds thumbnails (Images binding) and alt text + NSFW flag (Workers AI).

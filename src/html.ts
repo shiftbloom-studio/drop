@@ -2,7 +2,7 @@ import { bloomSvg, faviconSvg } from "./bloom";
 import { brandFrom, type Brand } from "./brand";
 import type { Item } from "./index";
 
-/* drop — UI following the shiftbloom studio brand book v2.
+/* drop - UI following the shiftbloom studio brand book v2.
  * Paper & ink with one loud flower: Bloom Red for actions and seeds, gradients only inside the mark.
  * Voices: Clash Display (statements), General Sans (UI/body), JetBrains Mono (labels, numbers, metadata). */
 
@@ -96,7 +96,7 @@ function operatorMark(cls = "sb") {
   return o.url ? `<a class="${cls}" href="${esc(o.url)}" aria-label="${esc(o.name)}">${inner}</a>` : `<span class="${cls}">${inner}</span>`;
 }
 
-const topbar = (right = "") => `<header class="top"><a class="brand" href="/" aria-label="${esc(BRAND.operator ? `drop \u2014 ${BRAND.operator.name}` : "drop")}">${bloom({ size: 30, id: "tb" })}<span class="word">drop<i>.</i></span></a>${right}</header>`;
+const topbar = (right = "") => `<header class="top"><a class="brand" href="/" aria-label="${esc(BRAND.operator ? `drop - ${BRAND.operator.name}` : "drop")}">${bloom({ size: 30, id: "tb" })}<span class="word">drop<i>.</i></span></a>${right}</header>`;
 
 /** AGPL §13: users interacting over a network must be offered the source. Set SOURCE_URL to your fork. */
 const sourceUrl = () => BRAND.sourceUrl;
@@ -464,11 +464,11 @@ export function llmsTxt(origin: string) {
 
 ## API (Authorization: Bearer <token>)
 
-- POST ${origin}/api/upload — multipart field "file" (ShareX image/file uploader); optional "expires"
-- PUT ${origin}/api/upload?filename=name.ext — raw body for large files
-- POST ${origin}/api/paste — "content", optional "lang", "expires" (ShareX text uploader)
-- POST ${origin}/api/shorten — "url" (ShareX URL shortener)
-- GET ${origin}/api/sharex?type=upload|paste|shorten — ready-made .sxcu config
+- POST ${origin}/api/upload - multipart field "file" (ShareX image/file uploader); optional "expires"
+- PUT ${origin}/api/upload?filename=name.ext - raw body for large files
+- POST ${origin}/api/paste - "content", optional "lang", "expires" (ShareX text uploader)
+- POST ${origin}/api/shorten - "url" (ShareX URL shortener)
+- GET ${origin}/api/sharex?type=upload|paste|shorten - ready-made .sxcu config
 - Responses: JSON with url, raw, thumbnail, delete, expires_at
 
 ## Links
