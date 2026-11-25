@@ -83,7 +83,7 @@ const head = (title: string, extra = "", index = false, lang = "en") => `<!docty
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/fonts.css">${extra}<style>${css}`;
 
 /** Set per request from the Worker's config: which optional links the pages show and who runs the instance. */
-let UI: { legal: boolean; abuseEmail: string | null; requests?: boolean; brand?: Brand } = { legal: false, abuseEmail: null, requests: false };
+let UI: { legal: boolean; abuseEmail: string | null; requests?: boolean; public?: boolean; brand?: Brand } = { legal: false, abuseEmail: null, requests: false, public: false };
 let BRAND: Brand = brandFrom();
 export function configureUi(c: typeof UI) { UI = c; BRAND = c.brand ?? brandFrom(); }
 
@@ -130,12 +130,15 @@ function landingMeta(origin: string) {
 <script type="application/ld+json">${JSON.stringify(ld).replace(/</g, "\\u003c")}</script>`;
 }
 
-export type Limits = { multiMb: number; maxMb: number };
+/** `pub` is set when visitors without a token may upload (see public.ts). */
+export type Limits = { multiMb: number; maxMb: number; pub?: { siteKey: string; maxMb: number; pasteKb: number } };
 
 export function landingPage(host: string, lim: Limits = { multiMb: 95, maxMb: 500 }, origin = `https://${host}`) {
   // the token check runs before first paint, so visitors never see the tool flash
   const early = `<script>try{if(localStorage.getItem('drop_token'))document.documentElement.classList.add('authed')}catch(e){}</script>`;
-  return `${head(BRAND.siteTitle, `${early}${landingMeta(origin)}`, true)}
+  const pub = lim.pub;
+  const ts = pub ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>` : "";
+  return `${head(BRAND.siteTitle, `${early}${ts}${landingMeta(origin)}`, true)}
 html.authed .anon,html:not(.authed) .member{display:none!important}
 html:not(.want) #tokf{display:none}
 .hero{display:grid;grid-template-columns:1.5fr 1fr;align-items:center;gap:32px;padding:clamp(32px,6vw,64px) 0 clamp(24px,4vw,40px)}
@@ -194,6 +197,9 @@ td.undo{color:var(--ink60);padding:18px 8px}
 .x{appearance:none;border:0;background:none;color:var(--ink60);cursor:pointer;font:500 13px var(--sans);padding:6px}.x:hover{color:var(--root)}
 .more{display:flex;justify-content:center;margin-top:18px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.res a.dl{flex:0 0 auto;font:13px/1.3 var(--sans);color:var(--ink60);white-space:nowrap}
+.gate+.tool{margin-top:20px}
+#ts:empty{display:none}
 @media (max-width:760px){.hero{grid-template-columns:1fr;align-items:start}.art{display:none}td.m,th.m{display:none}.mm{display:block}}
 </style></head><body>
 <div class="wrap">
@@ -206,25 +212,30 @@ ${topbar(`<div class="who"><span class="member">token saved</span><span class="m
   <div class="art" aria-hidden="true">${bloom({ size: 220, id: "hb" })}<span class="sprinkle" style="top:6%;left:10%">${SPARK(18)}</span><span class="sprinkle" style="top:14%;right:6%">${CROSS(10)}</span><span class="sprinkle" style="bottom:10%;left:18%"><svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#FF2E52"/></svg></span><span class="sprinkle" style="bottom:4%;right:16%">${SPARK(12, "#FF8FAB")}</span></div>
 </section>
 
-<section class="panel gate anon" aria-labelledby="gate-h">
+<section class="panel gate anon" aria-labelledby="gate-h">${pub
+    ? `
+  <h2 id="gate-h">No account, no history.</h2>
+  <p>You can drop files up to ${pub.maxMb} MB and text up to ${pub.pasteKb} KB without a token. Images, videos, audio, PDFs and plain text work. Only people you send the link to can open it, and it’s gone after 12 hours at the latest.</p>
+  <div class="row">${UI.requests ? `<a class="btn ghost" href="/request">Ask for a token</a>` : ""}<a class="btn ghost" href="${esc(sourceUrl())}#self-hosting">Set up your own</a><button`
+    : `
   <h2 id="gate-h">This one’s private.</h2>${UI.requests
     ? `<p>Uploading here needs a token. You can ask us for one, or set up your own drop on Cloudflare with the open source code.</p>
   <div class="row"><a class="btn" href="/request">Ask for a token</a><a class="btn ghost" href="${esc(sourceUrl())}#self-hosting">Set up your own</a><button`
     : `<p>Uploading here needs a token, and the token is ours. The code is open though, so you can run your own drop on your Cloudflare account.</p>
-  <div class="row"><a class="btn" href="${esc(sourceUrl())}#self-hosting">Set up your own</a><button`} class="lnk" id="have" type="button" aria-controls="tokf" aria-expanded="false">I have a token</button></div>
+  <div class="row"><a class="btn" href="${esc(sourceUrl())}#self-hosting">Set up your own</a><button`}`} class="lnk" id="have" type="button" aria-controls="tokf" aria-expanded="false">I have a token</button></div>
   <form id="tokf" autocomplete="on"><label class="label" for="tok">token</label>
   <div class="row"><input id="tok" name="password" type="password" autocomplete="current-password" placeholder="Paste your API token" required><button class="btn" type="submit">Remember</button></div>
   <p class="hint err" id="tokerr" role="alert"></p></form>
 </section>
 
-<section class="panel tool member" aria-label="Upload">
-  <div class="opts"><div class="tabs" role="tablist" aria-label="What are you sharing?"><button role="tab" id="t-up" aria-controls="p-up" aria-selected="true" type="button">File</button><button role="tab" id="t-paste" aria-controls="p-paste" aria-selected="false" tabindex="-1" type="button">Text</button><button role="tab" id="t-link" aria-controls="p-link" aria-selected="false" tabindex="-1" type="button">Link</button></div>
-  <label class="exp">delete after <select id="exp"><option value="never">never</option><option value="10m">10 minutes</option><option value="1h">1 hour</option><option value="1d">1 day</option><option value="7d">7 days</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="1y">1 year</option></select></label></div>
-  <div role="tabpanel" id="p-up" aria-labelledby="t-up"><div id="drop" role="button" tabindex="0" aria-label="Drop files here, or press Enter to pick them, up to ${lim.maxMb} MB"><strong>Drop files here</strong><span class="sub"><span class="desk">or press ctrl+v</span><span class="touch">or tap to pick</span> · up to ${lim.maxMb} mb</span><input type="file" id="file" multiple hidden></div></div>
+<section class="panel tool${pub ? "" : " member"}" aria-label="Upload">
+  <div class="opts"><div class="tabs" role="tablist" aria-label="What are you sharing?"><button role="tab" id="t-up" aria-controls="p-up" aria-selected="true" type="button">File</button><button role="tab" id="t-paste" aria-controls="p-paste" aria-selected="false" tabindex="-1" type="button">Text</button><button role="tab" id="t-link" class="member" aria-controls="p-link" aria-selected="false" tabindex="-1" type="button">Link</button></div>
+  ${pub ? `<label class="exp anon">delete after <select id="pexp"><option value="10m">10 minutes</option><option value="1h">1 hour</option><option value="12h" selected>12 hours</option></select></label>` : ""}<label class="exp member">delete after <select id="exp"><option value="never">never</option><option value="10m">10 minutes</option><option value="1h">1 hour</option><option value="12h">12 hours</option><option value="1d">1 day</option><option value="7d">7 days</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="1y">1 year</option></select></label></div>
+  <div role="tabpanel" id="p-up" aria-labelledby="t-up"><div id="drop" role="button" tabindex="0" aria-label="Drop files here, or press Enter to pick them${pub ? "" : `, up to ${lim.maxMb} MB`}"><strong>Drop files here</strong><span class="sub"><span class="desk">or press ctrl+v</span><span class="touch">or tap to pick</span> · up to ${pub ? `<span class="anon">${pub.maxMb} mb</span><span class="member">${lim.maxMb} mb</span>` : `${lim.maxMb} mb`}</span><input type="file" id="file" multiple hidden></div></div>
   <form role="tabpanel" id="p-paste" aria-labelledby="t-paste" hidden><label class="sr" for="ptext">Text or code</label><textarea id="ptext" placeholder="Paste text or code" spellcheck="false"></textarea><div class="row" style="margin-top:10px"><label class="sr" for="plang">Language for highlighting</label><input id="plang" placeholder="language, e.g. ts or json" style="width:240px;font-family:var(--mono);font-size:13px"><button class="btn" type="submit">Save as paste</button></div></form>
   <form role="tabpanel" id="p-link" aria-labelledby="t-link" hidden><div class="row"><label class="sr" for="lurl">Long URL</label><input class="grow" id="lurl" placeholder="https://" inputmode="url" style="font-family:var(--mono);font-size:14px"><button class="btn" type="submit">Shorten</button></div></form>
-  <div id="out" aria-live="polite"></div><p class="sr" id="live" aria-live="assertive"></p>
-  <div class="sx"><span class="label">sharex configs</span><a href="/api/sharex?type=upload" data-sx="upload">uploads</a><a href="/api/sharex?type=paste" data-sx="paste">text</a><a href="/api/sharex?type=shorten" data-sx="shorten">short links</a></div>
+  ${pub ? `<div id="ts" class="anon"></div>` : ""}<div id="out" aria-live="polite"></div><p class="sr" id="live" aria-live="assertive"></p>
+  <div class="sx member"><span class="label">sharex configs</span><a href="/api/sharex?type=upload" data-sx="upload">uploads</a><a href="/api/sharex?type=paste" data-sx="paste">text</a><a href="/api/sharex?type=shorten" data-sx="shorten">short links</a></div>
 </section>
 
 <section class="list member" id="recent" aria-labelledby="recent-h"><div class="row"><h2 id="recent-h">Recent uploads</h2><label class="exp"><span class="sr">Show</span><button class="btn ghost sm" id="reload" type="button">Refresh</button><select id="kind"><option value="">All</option><option value="file">Files</option><option value="paste">Pastes</option><option value="link">Links</option></select></label></div>
@@ -235,7 +246,7 @@ ${footer()}
 </div>
 <script>
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],R=document.documentElement;
-const LIM={multi:${lim.multiMb},max:${lim.maxMb}},MiB=1048576,PAGE=30;
+const LIM={multi:${lim.multiMb},max:${lim.maxMb}},MiB=1048576,PAGE=30,PUB=${pub ? JSON.stringify(pub).replace(/</g, "\\u003c") : "null"};
 let tok='';try{tok=localStorage.getItem('drop_token')||''}catch(e){}
 const A=()=>({authorization:'Bearer '+tok});
 const say=t=>{const l=$('#live');l.textContent='';setTimeout(()=>l.textContent=t,40)};
@@ -243,10 +254,10 @@ const num=(n,d)=>n.toLocaleString('en-GB',{maximumFractionDigits:d});
 const fs=n=>{const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<3){n/=1024;i++}return num(n,i?1:0)+' '+u[i]};
 const when=s=>new Date(s).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
 const BAD='That token doesn’t work. It may be mistyped, expired or revoked.';
-function why(st,b){if(st===401)return BAD;if(st===422&&b&&b.error)return b.error;if(st===429)return'Too many tries. Wait a minute, then try again.';if(st===413&&/paste/.test((b&&b.error)||''))return'That’s more than 10 MB of text. Upload it as a file instead.';return st?'Something went wrong ('+st+'). Try again in a moment.':'You’re offline. Try again once you’re connected.'}
+function why(st,b){if(!tok&&PUB&&b&&b.error&&/^(403|413|415|422|429)$/.test(String(st)))return b.error.charAt(0).toUpperCase()+b.error.slice(1)+(/[.!?]$/.test(b.error)?'':'.');if(st===401)return BAD;if(st===422&&b&&b.error)return b.error;if(st===429)return'Too many tries. Wait a minute, then try again.';if(st===413&&/paste/.test((b&&b.error)||''))return'That’s more than 10 MB of text. Upload it as a file instead.';return st?'Something went wrong ('+st+'). Try again in a moment.':'You’re offline. Try again once you’re connected.'}
 
 // token
-function setMode(on){R.classList.toggle('authed',on);if(on){R.classList.remove('want');load()}}
+function setMode(on){R.classList.toggle('authed',on);if(on){R.classList.remove('want');load()}else if(PUB&&$('#t-link').getAttribute('aria-selected')==='true')sel($('#t-up'))}
 async function check(t){try{return(await fetch('/api/list?limit=1',{headers:{authorization:'Bearer '+t}})).status}catch(e){return 0}}
 $('#have').onclick=()=>{R.classList.add('want');$('#have').setAttribute('aria-expanded','true');$('#tok').focus()};
 $('#tokf').onsubmit=async e=>{e.preventDefault();const v=$('#tok').value.trim(),er=$('#tokerr');if(!v)return;er.textContent='';const st=await check(v);
@@ -254,36 +265,51 @@ if(st===200){tok=v;try{localStorage.setItem('drop_token',v)}catch(x){}$('#tok').
 er.textContent=why(st)};
 $('#logout').onclick=()=>{try{localStorage.removeItem('drop_token')}catch(e){}tok='';setMode(false);};
 
+// without a token: one Turnstile check per upload, run one at a time
+let tsId=null,tsWait=null,tsChain=Promise.resolve('');
+async function human(){for(let i=0;i<100&&!window.turnstile;i++)await new Promise(r=>setTimeout(r,100));if(!window.turnstile)return'';
+if(tsId===null)tsId=turnstile.render('#ts',{sitekey:PUB.siteKey,action:'public-upload',execution:'execute',appearance:'interaction-only',theme:'light',callback:t=>{if(tsWait)tsWait(t)},'error-callback':()=>{if(tsWait)tsWait('')},'timeout-callback':()=>{if(tsWait)tsWait('')}});
+return new Promise(r=>{tsWait=t=>{tsWait=null;r(t)};turnstile.reset(tsId);turnstile.execute(tsId)})}
+const check2=()=>(tsChain=tsChain.then(human,human));
+const pubMode=()=>!!PUB&&!tok;
+
 // tabs
 const tabs=$$('[role=tab]');
 function sel(b){tabs.forEach(x=>{const on=x===b;x.setAttribute('aria-selected',on);x.tabIndex=on?0:-1;document.getElementById(x.getAttribute('aria-controls')).hidden=!on})}
-tabs.forEach((b,i)=>{b.onclick=()=>sel(b);b.onkeydown=e=>{let n=-1;if(e.key==='ArrowRight')n=(i+1)%tabs.length;else if(e.key==='ArrowLeft')n=(i+tabs.length-1)%tabs.length;else if(e.key==='Home')n=0;else if(e.key==='End')n=tabs.length-1;if(n<0)return;e.preventDefault();sel(tabs[n]);tabs[n].focus()}});
+// the Link tab is hidden without a token, so arrow keys move between the visible tabs only
+tabs.forEach(b=>{b.onclick=()=>sel(b);b.onkeydown=e=>{const v=tabs.filter(x=>x.offsetParent!==null),i=v.indexOf(b);let n=-1;if(e.key==='ArrowRight')n=(i+1)%v.length;else if(e.key==='ArrowLeft')n=(i+v.length-1)%v.length;else if(e.key==='Home')n=0;else if(e.key==='End')n=v.length-1;if(n<0)return;e.preventDefault();sel(v[n]);v[n].focus()}});
 
 // results
 function row(c){const d=document.createElement('div');d.className='res '+(c||'');$('#out').prepend(d);return d}
 function fail(d,t){d.className='res err';d.replaceChildren(t);say(t)}
 async function copy(u,b,auto){try{await navigator.clipboard.writeText(u);b.textContent='Copied';say('Copied');setTimeout(()=>b.textContent='Copy',1600)}catch(e){if(!auto)say('Something went wrong (clipboard). Try again in a moment.')}}
 function done(d,r){d.className='res';d.replaceChildren();const a=document.createElement('a');a.href=r.url;a.target='_blank';a.rel='noopener';a.textContent=r.url.replace(/^https?:\\/\\//,'');
-const b=document.createElement('button');b.className='btn sm';b.type='button';b.textContent='Copy';b.onclick=()=>copy(r.url,b);d.append(a,b);copy(r.url,b,true);say(a.textContent);load()}
+const b=document.createElement('button');b.className='btn sm';b.type='button';b.textContent='Copy';b.onclick=()=>copy(r.url,b);d.append(a);
+// without a token there is no history, so the deletion link is shown right here, once
+if(!tok&&r.delete){const x=document.createElement('a');x.className='dl';x.href=r.delete;x.target='_blank';x.rel='noopener';x.textContent='delete link';d.append(x)}
+d.append(b);copy(r.url,b,true);say(a.textContent);load()}
 
 // uploads with progress and cancel
-const hdr=x=>{x.setRequestHeader('authorization','Bearer '+tok);x.setRequestHeader('x-expires',$('#exp').value)};
-function one(f){const d=row('');if(f.size>LIM.max*MiB)return fail(d,f.name+' is '+fs(f.size)+'. The limit is '+LIM.max+' MB.');if(!f.size)return fail(d,f.name+' is empty.');
+const hdr=(x,t)=>{if(t==null){x.setRequestHeader('authorization','Bearer '+tok);x.setRequestHeader('x-expires',$('#exp').value)}else{x.setRequestHeader('x-turnstile',t);x.setRequestHeader('x-expires',$('#pexp').value)}};
+function one(f){const d=row(''),pm=pubMode(),max=pm?PUB.maxMb:LIM.max;if(f.size>max*MiB)return fail(d,f.name+' is '+fs(f.size)+'. The limit'+(pm?' without a token':'')+' is '+max+' MB.');if(!f.size)return fail(d,f.name+' is empty.');
+if(pm){d.textContent='Checking you\u2019re a person …';check2().then(t=>send(d,f,t))}else send(d,f,null)}
+function send(d,f,t){
 const x=new XMLHttpRequest(),bar=document.createElement('i'),nm=document.createElement('span'),pc=document.createElement('span'),c=document.createElement('button');
 bar.className='bar';nm.className='nm';nm.textContent='Uploading '+f.name+' …';pc.className='pct';pc.textContent='0 %';c.type='button';c.className='x';c.textContent='Cancel';c.onclick=()=>x.abort();d.append(bar,nm,pc,c);
 x.upload.onprogress=e=>{if(!e.lengthComputable)return;const p=e.loaded/e.total;bar.style.width=(p*100)+'%';pc.textContent=Math.floor(p*100)+' % · '+fs(e.loaded)+' of '+fs(e.total)};
-x.onload=()=>{let b=null;try{b=JSON.parse(x.responseText)}catch(e){}if(x.status>=200&&x.status<300&&b&&b.url)done(d,b);else fail(d,x.status===413?f.name+' is '+fs(f.size)+'. The limit is '+LIM.max+' MB.':why(x.status,b))};
+x.onload=()=>{let b=null;try{b=JSON.parse(x.responseText)}catch(e){}if(x.status>=200&&x.status<300&&b&&b.url)done(d,b);else fail(d,x.status===413&&t==null?f.name+' is '+fs(f.size)+'. The limit is '+LIM.max+' MB.':why(x.status,b))};
 x.onerror=()=>fail(d,why(0));x.onabort=()=>d.remove();
-if(f.size>LIM.multi*MiB){x.open('PUT','/api/upload?filename='+encodeURIComponent(f.name));hdr(x);x.setRequestHeader('content-type',f.type||'application/octet-stream');x.send(f)}
-else{x.open('POST','/api/upload');hdr(x);const fd=new FormData();fd.append('file',f);x.send(fd)}}
+if(t==null&&f.size>LIM.multi*MiB){x.open('PUT','/api/upload?filename='+encodeURIComponent(f.name));hdr(x);x.setRequestHeader('content-type',f.type||'application/octet-stream');x.send(f)}
+else{x.open('POST',t==null?'/api/upload':'/api/public/upload');hdr(x,t);const fd=new FormData();fd.append('file',f);x.send(fd)}}
 const up=fl=>{for(const f of fl)one(f)};
 const dz=$('#drop');dz.onclick=()=>$('#file').click();dz.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('#file').click()}};$('#file').onchange=e=>{up(e.target.files);e.target.value=''};
 dz.ondragover=e=>{e.preventDefault();dz.classList.add('over')};dz.ondragleave=()=>dz.classList.remove('over');dz.ondrop=e=>{e.preventDefault();dz.classList.remove('over');up(e.dataTransfer.files)};
-addEventListener('paste',e=>{if(!R.classList.contains('authed')||/TEXTAREA|INPUT/.test(e.target.tagName))return;const f=[...e.clipboardData.files];if(f.length)up(f)});
+addEventListener('paste',e=>{if(!(R.classList.contains('authed')||PUB)||/TEXTAREA|INPUT/.test(e.target.tagName))return;const f=[...e.clipboardData.files];if(f.length)up(f)});
 
 // pastes and links
 const URLBAD='That doesn’t look like a link. It needs to start with http:// or https://.';
-async function api(path,body){const d=row('');d.textContent='Saving …';try{const r=await fetch(path,{method:'POST',headers:{...A(),'x-expires':$('#exp').value,'content-type':'application/json'},body:JSON.stringify(body)});let b=null;try{b=await r.json()}catch(e){}
+async function api(path,body){const d=row(''),pm=pubMode();d.textContent=pm?'Checking you\u2019re a person …':'Saving …';try{const h=pm?{'x-turnstile':await check2(),'x-expires':$('#pexp').value}:{...A(),'x-expires':$('#exp').value};if(pm){path=path.replace('/api/','/api/public/');d.textContent='Saving …'}
+const r=await fetch(path,{method:'POST',headers:{...h,'content-type':'application/json'},body:JSON.stringify(body)});let b=null;try{b=await r.json()}catch(e){}
 if(r.ok&&b&&b.url){done(d,b);return true}fail(d,path==='/api/shorten'&&r.status===400?URLBAD:why(r.status,b))}catch(e){fail(d,why(0))}return false}
 $('#p-paste').onsubmit=async e=>{e.preventDefault();const t=$('#ptext').value;if(!t.trim())return fail(row(''),'There’s nothing to save yet.');if(await api('/api/paste',{content:t,lang:$('#plang').value.trim()}))$('#ptext').value=''};
 $('#p-link').onsubmit=async e=>{e.preventDefault();let u=$('#lurl').value.trim();if(!u)return fail(row(''),URLBAD);if(!/^[a-z][a-z0-9+.-]*:/i.test(u))u='https://'+u;
@@ -398,6 +424,11 @@ export function heldPage() {
   return simplePage("On hold · drop.", "on hold", "This file is on hold<em>.</em>", "An automatic check flagged it, so it can\u2019t be opened right now.", `<a class="btn" href="/">Back to drop</a>`);
 }
 
+/** Shown while a file uploaded without a token is still being checked. */
+export function checkingPage() {
+  return simplePage("Checking · drop.", "checking", "Still checking this file<em>.</em>", "Files uploaded without a token open once the automatic checks are done. That usually takes a few seconds.", `<a class="btn" href="">Try again</a>`);
+}
+
 /** Deletion links ask first, so a link preview or crawler that opens one deletes nothing. */
 export function deletePage(name: string, done: boolean) {
   return done
@@ -425,7 +456,7 @@ export function llmsTxt(origin: string) {
 > drop is a small, self-hostable file host, pastebin and URL shortener${BRAND.operator ? `, run here by ${BRAND.operator.name}` : ""}. It runs on Cloudflare Workers or as a Node.js server. Licensed AGPL-3.0-or-later.
 
 - Purpose: share screenshots, files, text snippets and long URLs as short links; built for ShareX, works with curl.
-- Limits: uploads need the owner's API token (this is not a public anonymous upload service); viewing is public for anyone with a link; items can expire (10m to 1y or never); multipart uploads up to 95 MB, raw PUT up to 500 MB.
+- Limits: ${UI.public ? "visitors without a token can upload images, videos, audio, PDFs and plain text through the start page (Turnstile check, per-IP limits, deleted after 12 hours at the latest); everything else needs an API token" : "uploads need the owner's API token (this is not a public anonymous upload service)"}; viewing is open only to whoever has a link, there is no public listing; items can expire (10m to 1y or never); multipart uploads up to 95 MB, raw PUT up to 500 MB.
 - Uploaded items are not meant to be indexed and send X-Robots-Tag: noindex.
 
 ## API (Authorization: Bearer <token>)
@@ -447,9 +478,11 @@ ${BRAND.operator?.url ? `- Operator: ${BRAND.operator.url}\n` : ""}`;
 /** Operator details come from the LEGAL config (see README); nothing personal is hardcoded here. */
 export type LegalInfo = { name: string; business?: string; street: string; city: string; country: { en: string; de: string }; email: string; phone?: string; vatId?: string; authority: string };
 type LegalKind = "privacy" | "datenschutz" | "imprint" | "impressum";
+/** `public`: visitors may upload without a token (12 hour items, Turnstile, per-IP limits). */
+type LegalOpts = { malwareLookup: boolean; abuseEmail: string | null; requests?: boolean; public?: boolean };
 const LEGAL_UPDATED = { en: "Last updated 25 November 2026", de: "Stand: 25. November 2026" };
 
-export function legalPage(kind: LegalKind, l: LegalInfo, o: { malwareLookup: boolean; abuseEmail: string | null; requests?: boolean }) {
+export function legalPage(kind: LegalKind, l: LegalInfo, o: LegalOpts) {
   const de = kind === "datenschutz" || kind === "impressum";
   const lang = de ? "de" : "en";
   const isPrivacy = kind === "privacy" || kind === "datenschutz";
@@ -457,7 +490,7 @@ export function legalPage(kind: LegalKind, l: LegalInfo, o: { malwareLookup: boo
   const other = { privacy: "/datenschutz", datenschutz: "/privacy", imprint: "/impressum", impressum: "/imprint" }[kind];
   const mail = `<a href="mailto:${esc(l.email)}">${esc(l.email)}</a>`;
   const address = `<address>${esc(l.name)}<br>${l.business ? `${esc(l.business)}<br>` : ""}${esc(l.street)}<br>${esc(l.city)}<br>${esc(l.country[lang])}</address>`;
-  const body = isPrivacy ? (de ? privacyDe(address, mail, l, o) : privacyEn(address, mail, l, o)) : imprint(de, address, mail, l);
+  const body = isPrivacy ? (de ? privacyDe(address, mail, l, o) : privacyEn(address, mail, l, o)) : imprint(de, address, mail, l, o);
   return `${head(`${title} · drop.`, "", false, lang)}
 .legal{max-width:44em;padding:clamp(28px,5vw,56px) 0 0}
 .legal h1{font-size:clamp(32px,4.6vw,48px)}
@@ -473,19 +506,23 @@ ${footer(lang)}
 </div></body></html>`;
 }
 
-function imprint(de: boolean, address: string, mail: string, l: LegalInfo) {
+function imprint(de: boolean, address: string, mail: string, l: LegalInfo, o: LegalOpts) {
   const phone = l.phone ? `<br>${de ? "Telefon" : "Phone"}: <a href="tel:${esc(l.phone.replace(/[^\d+]/g, ""))}">${esc(l.phone)}</a>` : "";
   const vat = l.vatId ? `<p>${de ? "Umsatzsteuer-Identifikationsnummer gemäß § 27a UStG" : "VAT ID pursuant to § 27a UStG"}: ${esc(l.vatId)}</p>` : "";
   return de
     ? `<p>Angaben gemäß § 5 DDG:</p>${address}<p>E-Mail: ${mail}${phone}</p>${vat}
 <h2>Verbraucherstreitbeilegung</h2><p>Wir sind nicht bereit oder verpflichtet, an Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teilzunehmen.</p>
-<h2>Inhalte von Nutzern</h2><p>Hochladen kann auf drop nur, wer den Token des Betreibers hat. Wenn dir trotzdem eine Datei auffällt, die gegen das Recht verstößt, schreib uns an ${mail}. Wir prüfen den Hinweis und entfernen rechtswidrige Inhalte umgehend.</p>`
+<h2>Inhalte von Nutzern</h2>${o.public
+      ? `<p>Auf drop kann jeder ohne Token Bilder, Videos, Audio, PDFs und Texte hochladen. Diese Inhalte sind nur über ihren Link erreichbar und werden nach spätestens 12 Stunden gelöscht. Wir machen sie uns nicht zu eigen und prüfen sie vor der Veröffentlichung nur automatisch. Lade nichts hoch, was gegen das Recht oder die Rechte anderer verstößt, keine Schadsoftware und keine sexuellen oder gewaltverherrlichenden Inhalte.</p><p>Wenn dir eine Datei auffällt, die gegen das Recht verstößt, schreib uns an ${o.abuseEmail ? `<a href="mailto:${esc(o.abuseEmail)}">${esc(o.abuseEmail)}</a>` : mail} oder nutze „Report this file“ auf ihrer Seite (Meldung nach Art. 16 DSA). Wir prüfen jeden Hinweis und entfernen rechtswidrige Inhalte umgehend.</p>`
+      : `<p>Hochladen kann auf drop nur, wer den Token des Betreibers hat. Wenn dir trotzdem eine Datei auffällt, die gegen das Recht verstößt, schreib uns an ${mail}. Wir prüfen den Hinweis und entfernen rechtswidrige Inhalte umgehend.</p>`}`
     : `<p>Information pursuant to § 5 DDG:</p>${address}<p>Email: ${mail}${phone}</p>${vat}
 <h2>Consumer dispute resolution</h2><p>We are not willing or obliged to take part in dispute resolution proceedings before a consumer arbitration board.</p>
-<h2>Content uploaded by users</h2><p>Only the holder of the operator's token can upload to drop. If you still come across a file that breaks the law, email us at ${mail}. We look into every report and remove unlawful content without delay.</p>`;
+<h2>Content uploaded by users</h2>${o.public
+      ? `<p>Anyone can upload images, videos, audio, PDFs and text to drop without a token. These can only be reached through their link and are deleted after 12 hours at the latest. We don't adopt them as our own content, and before they go online they are checked only automatically. Don't upload anything that breaks the law or someone else's rights, no malware and no sexual or glorifying violent content.</p><p>If you come across a file that breaks the law, email us at ${o.abuseEmail ? `<a href="mailto:${esc(o.abuseEmail)}">${esc(o.abuseEmail)}</a>` : mail} or use "Report this file" on its page (notice under Art. 16 DSA). We look into every report and remove unlawful content without delay.</p>`
+      : `<p>Only the holder of the operator's token can upload to drop. If you still come across a file that breaks the law, email us at ${mail}. We look into every report and remove unlawful content without delay.</p>`}`;
 }
 
-function privacyEn(address: string, mail: string, l: LegalInfo, o: { malwareLookup: boolean; abuseEmail: string | null; requests?: boolean }) {
+function privacyEn(address: string, mail: string, l: LegalInfo, o: LegalOpts) {
   return `<p>drop has no accounts for visitors and sets no cookies. There is no tracking or advertising, no analysis of visitors or their behavior, and no automated decision-making about you. This policy covers the personal data that is processed nonetheless when you open drop or a link to a file on it, above all your IP address, and the files themselves.</p>
 <h2>Controller</h2>${address}<p>Email: ${mail}</p>
 <h2>Hosting</h2>
@@ -495,14 +532,18 @@ function privacyEn(address: string, mail: string, l: LegalInfo, o: { malwareLook
 <p>Fonts and the code highlighter are fetched by our Worker and delivered from drop itself, so your browser doesn't contact Fontshare, jsDelivr or cdnjs.</p>
 <p>The legal basis is our legitimate interest in running drop securely and reliably (Art. 6(1)(f) GDPR). Cloudflare processes the data as our processor under a data processing agreement (Art. 28 GDPR). Cloudflare, Inc. is certified under the EU-U.S. Data Privacy Framework, for which the European Commission has adopted an adequacy decision (Art. 45 GDPR); the agreement also contains the EU standard contractual clauses. More in <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare's privacy policy</a>.</p>
 <h2>Files, texts and short links</h2>
-<p>${o.requests ? "Only we and people we\u2019ve given a token can upload to drop." : "Only we upload to drop, with a token that isn\u2019t public."} Anyone who has the link to a file, text or short link can open it. For each one we store the content in Cloudflare R2 and these details in Cloudflare D1 and Workers KV: file name, type, size, upload time, expiry time, a deletion code, a checksum (SHA-256) and the number of times it was opened. The view count is a plain number; it doesn't record who opened the link.</p>
+<p>${o.public ? "Anyone can upload files and texts to drop without a token, as described below. Short links and larger files need a token." : o.requests ? "Only we and people we\u2019ve given a token can upload to drop." : "Only we upload to drop, with a token that isn\u2019t public."} Anyone who has the link to a file, text or short link can open it. There is no public list or search of what was uploaded, and nobody can see someone else's uploads. For each one we store the content in Cloudflare R2 and these details in Cloudflare D1 and Workers KV: file name, type, size, upload time, expiry time, a deletion code, a checksum (SHA-256) and the number of times it was opened. The view count is a plain number; it doesn't record who opened the link.</p>
 <p>Before a photo is stored, drop removes location data (GPS) from JPEG and PNG files. For images, Cloudflare Workers AI writes a short description, used as alt text, and checks whether the image might be sensitive; Cloudflare's Images service makes a small preview. Both run at Cloudflare as our processor, and the results are stored with the file. Every upload is also checked automatically for programs and harmful content; files that fail the check are held back and can't be opened.${o.malwareLookup ? ` For this check we send the file's checksum, never the file itself, to MalwareBazaar, a database of known malware run by abuse.ch (Bern University of Applied Sciences, Switzerland, a country with an EU adequacy decision).` : ""}</p>
-<p>A file is deleted when its expiry time is reached (checked every hour) or when we delete it, together with its details and preview. If a file shows you or concerns you and you want it removed, email us${o.abuseEmail ? ` or use "Report this file" on its page` : ""}. The legal basis for storing and showing files is our legitimate interest in sharing them by link (Art. 6(1)(f) GDPR).</p>
+<p>A file is deleted when its expiry time is reached (checked every hour) or when we delete it, together with its details and preview.${o.public ? " Files and texts uploaded without a token expire after 12 hours at the latest, so they are gone within 13 hours." : ""} If a file shows you or concerns you and you want it removed, email us${o.abuseEmail ? ` or use "Report this file" on its page` : ""}. The legal basis for storing and showing files is our legitimate interest in sharing them by link (Art. 6(1)(f) GDPR).</p>
 ${o.requests ? `<h2>Token requests</h2>
 <p>You can ask for a token with the form at /request. We store the name and the answer you enter there, the time of the request, our decision and, once you have collected it, which token was issued, in Cloudflare D1. We don't ask for your email address. Instead you get a private link; we store only a checksum of it, so we can't recover it either. We use the data only to decide on your request and to issue the token (Art. 6(1)(b) GDPR) and delete it 30 days after the request, or 14 days after approval if that is later. Tokens you collect are stored only as a checksum, with the label and expiry date we set.</p>
 <p>The form is protected by Cloudflare Turnstile, which checks whether a person or a program is filling it in. For this, your browser loads a script from challenges.cloudflare.com, and Cloudflare processes technical data about your browser and device. Requests are also counted per IP address over one minute, as described above. The legal basis is our legitimate interest in protecting the form from automated abuse (Art. 6(1)(f) GDPR); data Turnstile stores in your browser is strictly necessary for the check you start (§ 25(2) no. 2 TDDDG). More in <a href="https://www.cloudflare.com/turnstile-privacy-policy/">Cloudflare's Turnstile privacy addendum</a>.</p>
+` : ""}${o.public ? `<h2>Uploading without a token</h2>
+<p>Each upload without a token is protected by Cloudflare Turnstile, which checks whether a person or a program is sending it. For this, your browser loads a script from challenges.cloudflare.com, and Cloudflare processes technical data about your browser and device. More in <a href="https://www.cloudflare.com/turnstile-privacy-policy/">Cloudflare's Turnstile privacy addendum</a>.</p>
+<p>To keep drop from being misused as free storage, uploads are counted per IP address: per minute in the memory of Cloudflare's rate limiter, and per day in Cloudflare D1. For the daily count we store neither your IP address nor anything that identifies you, only a checksum of the address combined with the date and a secret key, so it can't be turned back into the address or linked across days, together with the number and total size of today's uploads. These rows are deleted after two days at the latest. The file itself is stored without your IP address.</p>
+<p>A file uploaded without a token opens only after the automatic checks described above. Images that Workers AI flags as possibly sensitive stay on hold, and only we can release them. The legal basis for all of this is our legitimate interest in offering drop to everyone while protecting it from abuse and unlawful content (Art. 6(1)(f) GDPR); data Turnstile stores in your browser is strictly necessary for the check you start (§ 25(2) no. 2 TDDDG).</p>
 ` : ""}<h2>Your browser</h2>
-<p>If you have a token and enter it on the start page, your browser keeps it in its local storage under the name "drop_token", so you don't have to enter it again. It isn't a cookie, is only sent to drop with your own requests, and is removed with "Forget token". Visitors without a token store nothing. Storing it is strictly necessary for the function you asked for (§ 25(2) no. 2 TDDDG).</p>
+<p>If you have a token and enter it on the start page, your browser keeps it in its local storage under the name "drop_token", so you don't have to enter it again. It isn't a cookie, is only sent to drop with your own requests, and is removed with "Forget token". Visitors without a token store nothing${o.public ? ", apart from what Turnstile needs for its check" : ""}. Storing it is strictly necessary for the function you asked for (§ 25(2) no. 2 TDDDG).</p>
 <h2>Email</h2>
 <p>If you email us, we use your address and message only to reply (Art. 6(1)(f) GDPR) and delete them once the matter is settled, unless the law requires us to keep them.</p>
 <h2>Your rights</h2>
@@ -511,7 +552,7 @@ ${o.requests ? `<h2>Token requests</h2>
 <p><strong>You may object at any time, on grounds relating to your particular situation, to the processing of your personal data based on Art. 6(1)(f) GDPR (Art. 21 GDPR).</strong></p>`;
 }
 
-function privacyDe(address: string, mail: string, l: LegalInfo, o: { malwareLookup: boolean; abuseEmail: string | null; requests?: boolean }) {
+function privacyDe(address: string, mail: string, l: LegalInfo, o: LegalOpts) {
   return `<p>drop hat keine Benutzerkonten für Besucher und setzt keine Cookies. Es verwendet keine Tracking- oder Werbedienste, wertet weder Besucher noch ihr Verhalten aus und trifft keine automatisierten Entscheidungen über dich. Diese Erklärung beschreibt, welche personenbezogenen Daten trotzdem verarbeitet werden, wenn du drop oder einen Link zu einer Datei darauf öffnest, vor allem deine IP-Adresse, und was mit den Dateien selbst geschieht.</p>
 <h2>Verantwortlicher</h2>${address}<p>E-Mail: ${mail}</p>
 <h2>Hosting</h2>
@@ -521,14 +562,18 @@ function privacyDe(address: string, mail: string, l: LegalInfo, o: { malwareLook
 <p>Schriften und die Code-Hervorhebung lädt unser Worker selbst und liefert sie von drop aus, dein Browser verbindet sich also nicht mit Fontshare, jsDelivr oder cdnjs.</p>
 <p>Rechtsgrundlage ist unser berechtigtes Interesse an einem sicheren und zuverlässigen Betrieb von drop (Art. 6 Abs. 1 lit. f DSGVO). Cloudflare verarbeitet die Daten als unser Auftragsverarbeiter auf Grundlage eines Auftragsverarbeitungsvertrags (Art. 28 DSGVO). Cloudflare, Inc. ist nach dem EU-U.S. Data Privacy Framework zertifiziert, für das ein Angemessenheitsbeschluss der Europäischen Kommission besteht (Art. 45 DSGVO); der Vertrag enthält zusätzlich die EU-Standardvertragsklauseln. Mehr dazu in der <a href="https://www.cloudflare.com/de-de/privacypolicy/">Datenschutzerklärung von Cloudflare</a>.</p>
 <h2>Dateien, Texte und Kurzlinks</h2>
-<p>${o.requests ? "Hochladen können auf drop nur wir und Personen, denen wir einen Token gegeben haben." : "Hochladen können auf drop nur wir, mit einem Token, der nicht öffentlich ist."} Wer den Link zu einer Datei, einem Text oder einem Kurzlink hat, kann ihn öffnen. Zu jedem Eintrag speichern wir den Inhalt in Cloudflare R2 und diese Angaben in Cloudflare D1 und Workers KV: Dateiname, Typ, Größe, Zeitpunkt des Hochladens, Ablaufzeitpunkt, einen Löschcode, eine Prüfsumme (SHA-256) und wie oft er aufgerufen wurde. Die Aufrufzahl ist eine bloße Zahl; wer den Link geöffnet hat, wird nicht festgehalten.</p>
+<p>${o.public ? "Dateien und Texte kann jeder ohne Token auf drop hochladen, wie unten beschrieben. Für Kurzlinks und größere Dateien braucht es einen Token." : o.requests ? "Hochladen können auf drop nur wir und Personen, denen wir einen Token gegeben haben." : "Hochladen können auf drop nur wir, mit einem Token, der nicht öffentlich ist."} Wer den Link zu einer Datei, einem Text oder einem Kurzlink hat, kann ihn öffnen. Eine öffentliche Liste oder Suche der Uploads gibt es nicht, und niemand sieht die Uploads anderer. Zu jedem Eintrag speichern wir den Inhalt in Cloudflare R2 und diese Angaben in Cloudflare D1 und Workers KV: Dateiname, Typ, Größe, Zeitpunkt des Hochladens, Ablaufzeitpunkt, einen Löschcode, eine Prüfsumme (SHA-256) und wie oft er aufgerufen wurde. Die Aufrufzahl ist eine bloße Zahl; wer den Link geöffnet hat, wird nicht festgehalten.</p>
 <p>Bevor ein Foto gespeichert wird, entfernt drop Standortdaten (GPS) aus JPEG- und PNG-Dateien. Für Bilder schreibt Cloudflare Workers AI eine kurze Beschreibung, die als Alternativtext dient, und prüft, ob das Bild heikel sein könnte; Cloudflares Images-Dienst erstellt eine kleine Vorschau. Beides läuft bei Cloudflare als unserem Auftragsverarbeiter, die Ergebnisse werden mit der Datei gespeichert. Außerdem wird jede Datei automatisch auf Programme und schädliche Inhalte geprüft; Dateien, die dabei auffallen, werden zurückgehalten und lassen sich nicht öffnen.${o.malwareLookup ? ` Für diese Prüfung senden wir die Prüfsumme der Datei, nie die Datei selbst, an MalwareBazaar, eine Datenbank bekannter Schadsoftware von abuse.ch (Berner Fachhochschule, Schweiz, ein Land mit Angemessenheitsbeschluss der EU).` : ""}</p>
-<p>Eine Datei wird gelöscht, wenn ihr Ablaufzeitpunkt erreicht ist (stündlich geprüft) oder wenn wir sie löschen, zusammen mit ihren Angaben und der Vorschau. Wenn eine Datei dich zeigt oder betrifft und du sie entfernt haben möchtest, schreib uns${o.abuseEmail ? `, etwa über „Report this file“ auf ihrer Seite` : ""}. Rechtsgrundlage für das Speichern und Anzeigen von Dateien ist unser berechtigtes Interesse, sie per Link zu teilen (Art. 6 Abs. 1 lit. f DSGVO).</p>
+<p>Eine Datei wird gelöscht, wenn ihr Ablaufzeitpunkt erreicht ist (stündlich geprüft) oder wenn wir sie löschen, zusammen mit ihren Angaben und der Vorschau.${o.public ? " Dateien und Texte, die ohne Token hochgeladen wurden, laufen nach spätestens 12 Stunden ab und sind damit nach spätestens 13 Stunden gelöscht." : ""} Wenn eine Datei dich zeigt oder betrifft und du sie entfernt haben möchtest, schreib uns${o.abuseEmail ? `, etwa über „Report this file“ auf ihrer Seite` : ""}. Rechtsgrundlage für das Speichern und Anzeigen von Dateien ist unser berechtigtes Interesse, sie per Link zu teilen (Art. 6 Abs. 1 lit. f DSGVO).</p>
 ${o.requests ? `<h2>Token-Anfragen</h2>
 <p>Über das Formular unter /request kannst du einen Token anfragen. Wir speichern den Namen und die Antwort, die du dort eingibst, den Zeitpunkt der Anfrage, unsere Entscheidung und, sobald du ihn abgeholt hast, welcher Token ausgegeben wurde, in Cloudflare D1. Nach deiner E-Mail-Adresse fragen wir nicht. Stattdessen bekommst du einen privaten Link; davon speichern wir nur eine Prüfsumme, können ihn also auch selbst nicht wiederherstellen. Wir nutzen die Daten nur, um über deine Anfrage zu entscheiden und den Token auszugeben (Art. 6 Abs. 1 lit. b DSGVO), und löschen sie 30 Tage nach der Anfrage, oder 14 Tage nach der Freigabe, falls das später ist. Abgeholte Tokens werden nur als Prüfsumme gespeichert, mit der Bezeichnung und dem Ablaufdatum, die wir festlegen.</p>
 <p>Das Formular ist durch Cloudflare Turnstile geschützt, das prüft, ob ein Mensch oder ein Programm es ausfüllt. Dazu lädt dein Browser ein Skript von challenges.cloudflare.com, und Cloudflare verarbeitet technische Daten über deinen Browser und dein Gerät. Außerdem werden Anfragen je IP-Adresse über eine Minute gezählt, wie oben beschrieben. Rechtsgrundlage ist unser berechtigtes Interesse, das Formular vor automatisiertem Missbrauch zu schützen (Art. 6 Abs. 1 lit. f DSGVO); was Turnstile dafür in deinem Browser speichert, ist für die von dir gestartete Prüfung unbedingt erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG). Mehr dazu im <a href="https://www.cloudflare.com/turnstile-privacy-policy/">Turnstile-Datenschutzhinweis von Cloudflare</a>.</p>
+` : ""}${o.public ? `<h2>Hochladen ohne Token</h2>
+<p>Jeder Upload ohne Token ist durch Cloudflare Turnstile geschützt, das prüft, ob ein Mensch oder ein Programm ihn sendet. Dazu lädt dein Browser ein Skript von challenges.cloudflare.com, und Cloudflare verarbeitet technische Daten über deinen Browser und dein Gerät. Mehr dazu im <a href="https://www.cloudflare.com/turnstile-privacy-policy/">Turnstile-Datenschutzhinweis von Cloudflare</a>.</p>
+<p>Damit drop nicht als kostenloser Speicher missbraucht wird, zählen wir Uploads je IP-Adresse: pro Minute im Arbeitsspeicher von Cloudflares Rate-Limiter und pro Tag in Cloudflare D1. Für die Tageszählung speichern wir weder deine IP-Adresse noch etwas, das dich erkennbar macht, sondern nur eine Prüfsumme aus der Adresse, dem Datum und einem geheimen Schlüssel, die sich nicht in die Adresse zurückrechnen oder über Tage hinweg verknüpfen lässt, dazu Anzahl und Gesamtgröße der heutigen Uploads. Diese Einträge werden nach spätestens zwei Tagen gelöscht. Die Datei selbst wird ohne deine IP-Adresse gespeichert.</p>
+<p>Eine ohne Token hochgeladene Datei lässt sich erst nach den oben beschriebenen automatischen Prüfungen öffnen. Bilder, die Workers AI als möglicherweise heikel einstuft, bleiben zurückgehalten, und nur wir können sie freigeben. Rechtsgrundlage ist unser berechtigtes Interesse, drop allen anzubieten und es zugleich vor Missbrauch und rechtswidrigen Inhalten zu schützen (Art. 6 Abs. 1 lit. f DSGVO); was Turnstile dafür in deinem Browser speichert, ist für die von dir gestartete Prüfung unbedingt erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG).</p>
 ` : ""}<h2>Dein Browser</h2>
-<p>Wenn du einen Token hast und ihn auf der Startseite eingibst, speichert dein Browser ihn in seinem lokalen Speicher unter dem Namen „drop_token“, damit du ihn nicht erneut eingeben musst. Er ist kein Cookie, wird nur mit deinen eigenen Anfragen an drop gesendet und mit „Forget token“ entfernt. Für Besucher ohne Token wird nichts gespeichert. Das Speichern ist für die von dir gewünschte Funktion unbedingt erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG).</p>
+<p>Wenn du einen Token hast und ihn auf der Startseite eingibst, speichert dein Browser ihn in seinem lokalen Speicher unter dem Namen „drop_token“, damit du ihn nicht erneut eingeben musst. Er ist kein Cookie, wird nur mit deinen eigenen Anfragen an drop gesendet und mit „Forget token“ entfernt. Für Besucher ohne Token wird nichts gespeichert${o.public ? ", außer dem, was Turnstile für seine Prüfung braucht" : ""}. Das Speichern ist für die von dir gewünschte Funktion unbedingt erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG).</p>
 <h2>E-Mail</h2>
 <p>Wenn du uns schreibst, nutzen wir deine Adresse und Nachricht nur, um dir zu antworten (Art. 6 Abs. 1 lit. f DSGVO), und löschen sie, sobald die Sache erledigt ist, es sei denn, das Gesetz verpflichtet uns zur Aufbewahrung.</p>
 <h2>Deine Rechte</h2>

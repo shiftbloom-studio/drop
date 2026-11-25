@@ -14,6 +14,7 @@ import { FsBucket, LocalQueue, MemoryKV, MemoryRateLimit, SqliteD1 } from "./bin
 export const WORKER_VARS = [
   "API_TOKEN", "MAX_MULTIPART_MB", "MAX_STREAM_MB", "MB_AUTH_KEY", "ABUSE_EMAIL", "LEGAL",
   "TURNSTILE_SITE_KEY", "TURNSTILE_SECRET", "BRAND", "SOURCE_URL", "OPERATOR_NAME", "OPERATOR_URL", "OPERATOR_PLACE",
+  "PUBLIC_UPLOADS", "PUBLIC_MAX_MB", "PUBLIC_PASTE_KB", "PUBLIC_DAILY_UPLOADS", "PUBLIC_DAILY_MB",
 ] as const;
 
 export type DropOptions = {
@@ -82,6 +83,7 @@ export async function startDrop(o: DropOptions) {
     AUTH_RL: new MemoryRateLimit(10, 60),
     MISS_RL: new MemoryRateLimit(60, 60),
     REQ_RL: new MemoryRateLimit(3, 60),
+    PUB_RL: new MemoryRateLimit(6, 60),
   } as Record<string, unknown>;
   const queue = new LocalQueue<{ type: "scan" | "analyze"; id: string }>("drop-jobs", () => (batch) => worker.queue(batch as never, env as unknown as Env), 3);
   env.JOBS = queue;
