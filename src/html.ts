@@ -39,7 +39,7 @@ const CROSS = (size: number, color = "#1A1216") =>
 
 // ---------- shared styles ----------
 const css = `
-:root{--bloom:#FF2E52;--root:#C81040;--petal:#FF8FAB;--blush:#FFE9EF;--ink:#1A1216;--ink60:rgba(26,18,22,.66);--ink40:rgba(26,18,22,.42);--line:#ece4e6;--paper:#fff;--warm:#FAF6F4;
+:root{--bloom:#FF2E52;--root:#C81040;--petal:#FF8FAB;--blush:#FFE9EF;--ink:#1A1216;--ink60:rgba(26,18,22,.66);--ink40:rgba(26,18,22,.42);--line:#E4DADB;--paper:#F6F1EE;--warm:#EEE6E2;
 --display:"Clash Display",ui-sans-serif,system-ui,sans-serif;--sans:"General Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
 --ease:cubic-bezier(.22,1.1,.36,1);--settle:cubic-bezier(.4,0,.2,1)}
 *{box-sizing:border-box}[hidden]{display:none!important}html{-webkit-text-size-adjust:100%}
@@ -67,7 +67,7 @@ h2{font-size:24px;line-height:1.1}
 .sb{font:600 15px/1 var(--display);letter-spacing:-.02em;color:var(--ink);background:none;white-space:nowrap}.sb span{font-weight:400;color:var(--ink60);margin-left:.28em}.sb i{font-style:normal;color:var(--bloom)}
 .sprinkle{position:absolute;pointer-events:none}
 @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.02)}}
-input,textarea,select{font:15px/1.5 var(--sans);color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 14px;width:100%;transition:border-color .24s var(--settle),box-shadow .24s var(--settle)}
+input,textarea,select{font:15px/1.5 var(--sans);color:var(--ink);background:#FBF8F6;border:1px solid var(--line);border-radius:12px;padding:11px 14px;width:100%;transition:border-color .24s var(--settle),box-shadow .24s var(--settle)}
 input:focus,textarea:focus,select:focus{outline:0;border-color:var(--bloom);box-shadow:0 0 0 3px var(--blush)}
 textarea{min-height:200px;font:13px/1.6 var(--mono);resize:vertical}
 .panel{background:var(--warm);border-radius:20px;padding:clamp(18px,3vw,32px)}
@@ -79,7 +79,7 @@ textarea{min-height:200px;font:13px/1.6 var(--mono);resize:vertical}
 `;
 
 const head = (title: string, extra = "", index = false, lang = "en") => `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title>${index ? "" : `<meta name="robots" content="noindex">`}<meta name="theme-color" content="#ffffff">
+<title>${esc(title)}</title>${index ? "" : `<meta name="robots" content="noindex">`}<meta name="theme-color" content="#F6F1EE">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/fonts.css">${extra}<style>${css}`;
 
 /** Set per request from the Worker's config: which optional links the pages show and who runs the instance. */
@@ -160,19 +160,19 @@ html.authed .who:before{content:"";width:7px;height:7px;border-radius:50%;backgr
 .tool{display:grid;gap:18px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1 1 240px}
 .opts{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-.tabs{display:inline-flex;gap:4px;background:#fff;border-radius:999px;padding:4px;box-shadow:inset 0 0 0 1px var(--line)}
+.tabs{display:inline-flex;gap:4px;background:#FBF8F6;border-radius:999px;padding:4px;box-shadow:inset 0 0 0 1px var(--line)}
 .tabs button{appearance:none;border:0;background:transparent;border-radius:999px;padding:9px 18px;font:500 14px/1 var(--sans);color:var(--ink60);cursor:pointer;transition:background .24s var(--settle),color .24s var(--settle)}
 .tabs button[aria-selected=true]{background:var(--ink);color:#fff}
 .tabs button:focus-visible{outline:2px solid var(--root);outline-offset:2px}
 .exp{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--ink60)}
 .exp select{width:auto;padding:8px 34px 8px 12px;border-radius:999px;font:500 14px/1 var(--sans)}
-#drop{border:1.5px dashed rgba(26,18,22,.28);border-radius:18px;background:#fff;padding:clamp(32px,5vw,52px) 20px;text-align:center;cursor:pointer;transition:border-color .24s var(--settle),background .24s var(--settle)}
+#drop{border:1.5px dashed rgba(26,18,22,.28);border-radius:18px;background:#FBF8F6;padding:clamp(32px,5vw,52px) 20px;text-align:center;cursor:pointer;transition:border-color .24s var(--settle),background .24s var(--settle)}
 #drop:hover,#drop.over,#drop:focus-visible{border-color:var(--bloom);background:var(--blush);outline:0}
 #drop strong{display:block;font:600 24px/1.1 var(--display);letter-spacing:-.02em;margin:0 0 8px}
 #drop .sub{font-size:14px;color:var(--ink60)}
 .touch{display:none}@media (pointer:coarse){.touch{display:inline}.desk{display:none}}
 #out{display:grid;gap:8px}#out:empty{display:none}
-.res{position:relative;overflow:hidden;display:flex;align-items:center;gap:12px;background:#fff;border-radius:14px;padding:10px 10px 10px 16px;min-height:52px;box-shadow:inset 0 0 0 1px var(--line);animation:unfold .24s var(--ease) both}
+.res{position:relative;overflow:hidden;display:flex;align-items:center;gap:12px;background:#FBF8F6;border-radius:14px;padding:10px 10px 10px 16px;min-height:52px;box-shadow:inset 0 0 0 1px var(--line);animation:unfold .24s var(--ease) both}
 .res a{font:500 14px/1.3 var(--mono);flex:1;word-break:break-all}
 .res .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
 .res .pct{font:12px/1 var(--mono);color:var(--ink60);white-space:nowrap}
