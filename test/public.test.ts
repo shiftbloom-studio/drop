@@ -161,11 +161,17 @@ describe("public uploads on Node.js", () => {
   it("limits public uploads per minute", async () => {
     const env = drop.env as unknown as Record<string, unknown>, keep = env.PUB_RL;
     env.PUB_RL = new MemoryRateLimit(1, 60);
-    verdict = { success: false };
-    expect((await up("x", "x.txt")).status).toBe(403);
-    expect((await up("x", "x.txt")).status).toBe(429);
-    verdict = { success: true, action: "public-upload", hostname: "127.0.0.1" };
-    env.PUB_RL = keep;
+    try {
+      verdict = { success: false };
+      expect((await up("x", "x.txt")).status).toBe(403);
+      // the limit answers before the body is read, so this request sends none: with a body, the server
+      // closes the connection early and the client can fail with EPIPE before it sees the 429
+      expect((await realFetch(`${drop.url}/api/public/upload`, { method: "POST", headers: { "x-turnstile": "ok" } })).status).toBe(429);
+    } finally {
+      // even if this test fails, the later ones get the normal limit back
+      verdict = { success: true, action: "public-upload", hostname: "127.0.0.1" };
+      env.PUB_RL = keep;
+    }
   });
 
   it("serves public PDFs only as sandboxed downloads", async () => {
