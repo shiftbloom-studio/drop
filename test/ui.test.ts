@@ -68,6 +68,7 @@ describe("pages", () => {
   });
   it("asks before deleting", () => {
     expect(deletePage("x.png", false)).toContain('<form method="post">');
-    expect(deletePage("<b>", true)).toContain("&lt;b&gt;");
+    expect(deletePage("<b>", false)).toContain("&lt;b&gt;");
+    expect(deletePage("x", true)).toContain("The link doesn\u2019t work anymore.");
   });
 });

@@ -407,8 +407,8 @@ export function heldPage() {
 /** Deletion links ask first, so a link preview or crawler that opens one deletes nothing. */
 export function deletePage(name: string, done: boolean) {
   return done
-    ? simplePage("Deleted · drop.", "deleted", `${esc(name)} is gone<em>.</em>`, "Its link doesn\u2019t work anymore.", `<a class="btn" href="/">Back to drop</a>`)
-    : simplePage("Delete? · drop.", "delete", `Delete ${esc(name)}?`, "Its link stops working right away.", `<form method="post"><button class="btn" type="submit">Delete</button></form>`);
+    ? simplePage("Deleted · drop.", "deleted", `Deleted<em>.</em>`, "The link doesn\u2019t work anymore.", `<a class="btn" href="/">Back to drop</a>`)
+    : simplePage("Delete? · drop.", "delete", `Delete ${esc(name)}?`, "This can\u2019t be undone.", `<form method="post"><button class="btn" type="submit">Delete</button></form>`);
 }
 
 /** 1200×630 card, rendered once into /og.png (Browser Rendering screenshot). */

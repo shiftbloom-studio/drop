@@ -132,8 +132,8 @@ function baseItem(id: string, kind: Kind, expires_at: number | null): Item {
 // ---------- API handlers ----------
 const BLOCK_MSG: Record<string, (n: string) => string> = {
   program: (n) => `${n} is a program, script or installer. drop doesn\u2019t host those.`,
-  macro: (n) => `${n} is an Office file with macros. Save it without macros and try again.`,
-  malware: (n) => `${n} was flagged as malware and wasn\u2019t saved.`,
+  macro: () => `Office files with macros can\u2019t be uploaded. Save it as .docx or .xlsx and try again.`,
+  malware: () => `A virus scan flagged this file, so it wasn\u2019t uploaded.`,
 };
 
 async function handleUpload(req: Request, env: Env, ctx: ExecutionContext) {
