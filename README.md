@@ -15,7 +15,7 @@ It runs at [drop.shiftbloom.studio](https://drop.shiftbloom.studio) and is made 
 - The web UI takes drag and drop or Ctrl+V, shows upload progress, and lists recent items with a short undo window on delete.
 - Fonts and highlight.js are proxied through the Worker, so visitors never talk to third-party CDNs. The homepage may be indexed. Uploads, pastes, raw files and short links send `X-Robots-Tag: noindex`.
 
-Uploading and every `/api/*` route need an API token: the `API_TOKEN` secret or a named token (see [API tokens](#api-tokens)). Viewing an item is public for anyone who has its link.
+Uploading and every `/api/*` route need an API token: the `API_TOKEN` secret or a named token (see [API tokens](#api-tokens)). The operator can also let visitors upload without a token, for at most 12 hours (see [Public uploads](#public-uploads)). Viewing an item is open to anyone who has its link. There is no public listing, and each token's history is visible only to that token.
 
 ## Architecture
 
@@ -72,7 +72,8 @@ Settings that both share (vars on Cloudflare, environment variables on Node.js):
 | `SOURCE_URL` | where your copy of the code lives (AGPL section 13). Defaults to this repository. |
 | `ABUSE_EMAIL`, `LEGAL` | report link and legal pages, see [Legal pages](#legal-pages) |
 | `MB_AUTH_KEY` | optional MalwareBazaar lookups |
-| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | optional [token requests](#token-requests) |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | optional [token requests](#token-requests) and [public uploads](#public-uploads) |
+| `PUBLIC_UPLOADS` | `on` lets visitors upload without a token, see [Public uploads](#public-uploads) |
 
 ### Run with Node.js or Docker
 
@@ -182,6 +183,8 @@ You can also send the expiry as an `X-Expires` header. Response:
   "delete": "https://drop.example.com/d/aB3dE/<delete-token>", "expires_at": null }
 ```
 
+Without a token, the start page uses `POST /api/public/upload` (multipart `file`) and `POST /api/public/paste` (JSON `{content, lang, title, expires}`). Both need a fresh Turnstile token in the `X-Turnstile` header and only exist while [public uploads](#public-uploads) are on.
+
 Public routes: `/:id` (view page or redirect), `/:id/raw`, `/:id.ext` (direct link), `/:id/dl`, `/:id/thumb`, `/d/:id/:deleteToken`.
 
 ### ShareX
@@ -230,10 +233,21 @@ Then the start page offers "Ask for a token", which leads to a form at `/request
 
 Approved tokens have to be collected within 14 days. Requests are deleted 30 days after they were made (or once the claim window has passed). For extra protection, add a Cloudflare WAF custom rule with the action *Managed Challenge* for `http.request.uri.path eq "/request"` on your hostname.
 
+## Public uploads
+
+With `PUBLIC_UPLOADS=on` and both Turnstile keys set, visitors without a token can upload from the start page. It's off by default. Apply migration `0007_public_usage.sql` first.
+
+- Files up to `PUBLIC_MAX_MB` (default `25`) and pastes up to `PUBLIC_PASTE_KB` (default `512`). Only passive types are taken: images, video, audio, PDF and plain text. Short links, raw `PUT` uploads and ShareX need a token.
+- Every item expires after 12 hours at the latest (`10m`, `1h` or `12h`). The hourly cron deletes it from R2, D1 and KV. Public files live under the `pub/` prefix in R2, so you can add an R2 lifecycle rule (for example "delete objects under `pub/` after 1 day") as a second line of defense.
+- Each upload needs its own Turnstile check for the action `public-upload` on your hostname. `PUB_RL` limits uploads per IP and minute (default 6). A daily cap per IP (`PUBLIC_DAILY_UPLOADS`, default `30`, and `PUBLIC_DAILY_MB`, default `200`) is counted in the `public_usage` table under a SHA-256 of the day, the address and the `API_TOKEN` secret, never the address itself. Rows are deleted after two days.
+- A public file answers "still checking" (HTTP 503) until the background scan has run. With Workers AI, images also wait for the sensitive content check and stay on hold when it flags them. Only the master token can release a file on hold.
+- Public items get 10-character ids instead of 5, so their links can't be guessed. They belong to no token: no token's history lists them, and the uploader gets the deletion link once, in the upload result. The master token can review them with `GET /api/list?scope=public`.
+- The privacy policy and imprint add sections on public uploads while the feature is on.
+
 ## Security model
 
 - Uploads are protected by the `API_TOKEN` secret and by named tokens. Treat `.sxcu` files like passwords. Rotate the master token with `wrangler secret put API_TOKEN`; revoke a named token instead of rotating the master token when only one device or person should lose access.
-- Failed token attempts, requests for ids that don't exist and token requests are rate limited per IP (`AUTH_RL`, `MISS_RL`, `REQ_RL` in `wrangler.jsonc`).
+- Failed token attempts, requests for ids that don't exist, token requests and public uploads are rate limited per IP (`AUTH_RL`, `MISS_RL`, `REQ_RL`, `PUB_RL` in `wrangler.jsonc`).
 - Token requests are checked with Turnstile on the server. Claim links are 32 random characters, stored only as a hash, served with `no-store`, `noindex` and `Referrer-Policy: no-referrer`, and a token is issued only from a POST, so link scanners can't collect it.
 - drop looks at the first bytes of every upload instead of trusting the file name or the client's content type. Programs, scripts, installers, disk images and Office files with macros are refused, also when they are renamed.
 - Only passive types (common images, audio, video, PDF and plain text) are shown inline. Everything else, including HTML and SVG, is served as `application/octet-stream` with `Content-Disposition: attachment`. Raw files also get `Content-Security-Policy: sandbox`, so nothing uploaded runs script on your origin.

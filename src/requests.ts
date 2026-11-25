@@ -68,8 +68,8 @@ export function requestState(row: Pick<RequestRow, "status" | "decided_at">, now
   return row.status;
 }
 
-/** Cloudflare Turnstile server-side check. */
-export async function verifyTurnstile(secret: string, token: string, ip: string | null, fetcher: typeof fetch = fetch) {
+/** Cloudflare Turnstile server-side check, for one widget action (and, when given, the hostname it ran on). */
+export async function verifyTurnstile(secret: string, token: string, ip: string | null, fetcher: typeof fetch = fetch, action = "token-request", hostname?: string) {
   if (!token || token.length > 2048) return false;
   const body = new FormData();
   body.append("secret", secret);
@@ -77,8 +77,9 @@ export async function verifyTurnstile(secret: string, token: string, ip: string 
   if (ip) body.append("remoteip", ip);
   try {
     const res = await fetcher("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body });
-    const out = (await res.json()) as { success?: boolean; action?: string };
-    return out.success === true && (!out.action || out.action === "token-request");
+    const out = (await res.json()) as { success?: boolean; action?: string; hostname?: string };
+    // a token solved for another action or on another site doesn't count here
+    return out.success === true && (!out.action || out.action === action) && (!hostname || !out.hostname || out.hostname === hostname);
   } catch {
     return false;
   }

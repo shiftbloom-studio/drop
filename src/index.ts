@@ -4,13 +4,14 @@
  * Storage: R2 (blobs + thumbnails), D1 (metadata, source of truth), KV (hot lookup cache for short ids).
  * Background: Queue consumer builds thumbnails (Images binding) and alt text + NSFW flag (Workers AI).
  */
-import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, deletePage, legalPage, configureUi, requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "./ui.js";
+import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, checkingPage, deletePage, legalPage, configureUi, requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "./ui.js";
 import { CLAIM_WINDOW, KEEP_REQUESTS, MAX_PENDING, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile, type RequestRow } from "./requests";
 import { sniff, blockReason, effectiveType, INLINE_TYPES, stripJpegLocation, stripPngLocation, inspectZip } from "./safety";
 import { brandFrom, type BrandEnv } from "./brand";
+import { CHECKING, PUBLIC_ACTION, PUBLIC_ID_LENGTH, PUBLIC_OWNER, PUBLIC_PREFIX, publicEnabled, publicExpiry, publicLimits, publicTypeAllowed, usageKey, utcDay, withinDailyCap, type PublicEnv, type PublicLimits } from "./public";
 import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName, robotsTxt, ownerFilter, canManage, MASTER_OWNER, type Principal } from "./util";
 
-export interface Env extends BrandEnv {
+export interface Env extends BrandEnv, PublicEnv {
   FILES: R2Bucket;
   DB: D1Database;
   LINKS: KVNamespace;
@@ -35,6 +36,8 @@ export interface Env extends BrandEnv {
   TURNSTILE_SECRET?: string;
   /** Rate limiter for sent token requests, per IP. */
   REQ_RL?: RateLimit;
+  /** Rate limiter for public uploads (no token), per IP. */
+  PUB_RL?: RateLimit;
 }
 
 type Kind = "file" | "paste" | "link";
@@ -88,8 +91,9 @@ function links(req: Request, it: Item) {
   };
 }
 
-async function newId(env: Env) {
-  for (let len = 5; len < 10; len++) {
+/** Public items get longer ids (10+ characters, about 58 bits), so their links can't be guessed or enumerated. */
+async function newId(env: Env, min = 5) {
+  for (let len = min; len < min + 5; len++) {
     for (let i = 0; i < 3; i++) {
       const id = randomString(len);
       const hit = await env.DB.prepare("SELECT 1 FROM items WHERE id = ?").bind(id).first();
@@ -147,7 +151,8 @@ const BLOCK_MSG: Record<string, (n: string) => string> = {
   malware: () => `A virus scan flagged this file, so it wasn\u2019t uploaded.`,
 };
 
-async function handleUpload(req: Request, env: Env, ctx: ExecutionContext, p: Principal) {
+/** `pub` is set for uploads without a token (see public.ts): smaller limit, 12 hour expiry, passive types only. */
+async function handleUpload(req: Request, env: Env, ctx: ExecutionContext, p: Principal, pub?: PublicLimits) {
   const url = new URL(req.url);
   const ct = req.headers.get("content-type") || "";
   let expiresRaw = req.headers.get("x-expires") || url.searchParams.get("expires");
@@ -155,13 +160,14 @@ async function handleUpload(req: Request, env: Env, ctx: ExecutionContext, p: Pr
   const scan = req.headers.get("malicious-uploads-detection");
 
   let name: string, declared: string;
-  const id = await newId(env);
+  const id = await newId(env, pub ? PUBLIC_ID_LENGTH : 5);
   let it: Item;
 
   if (ct.startsWith("multipart/form-data")) {
-    const max = Number(env.MAX_MULTIPART_MB || 95) * 1024 * 1024;
+    const max = pub ? pub.maxBytes : Number(env.MAX_MULTIPART_MB || 95) * 1024 * 1024;
     const len = Number(req.headers.get("content-length") || 0);
-    if (len > max) return err(413, `multipart uploads are limited to ${env.MAX_MULTIPART_MB || 95} MB; use PUT /api/upload for larger files`);
+    if (pub && len > max + 65536) return err(413, `without a token, files are limited to ${Math.round(max / 1048576)} MB`);
+    if (!pub && len > max) return err(413, `multipart uploads are limited to ${env.MAX_MULTIPART_MB || 95} MB; use PUT /api/upload for larger files`);
     const form = await req.formData();
     const f = (form.get("file") || form.get("sharex") || form.get("files[]")) as unknown;
     if (!f || typeof f === "string") return err(400, "missing form field 'file'");
@@ -171,18 +177,21 @@ async function handleUpload(req: Request, env: Env, ctx: ExecutionContext, p: Pr
     declared = file.type;
     let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer());
     if (bytes.length === 0) return err(400, "empty file");
+    if (pub && bytes.length > max) return err(413, `without a token, files are limited to ${Math.round(max / 1048576)} MB`);
     const sniffed = sniff(bytes.subarray(0, 4100));
     const reason = scan === "1" ? "malware" : blockReason(name, sniffed);
     if (reason) return err(422, BLOCK_MSG[reason](name));
     const mime = effectiveType(declared, sniffed, bytes.subarray(0, 1024));
+    if (pub && !publicTypeAllowed(mime)) return err(415, `Without a token, drop takes images, videos, audio, PDFs and plain text. ${name} isn\u2019t one of those.`);
     if (mime === "image/jpeg") bytes = stripJpegLocation(bytes).bytes;
     else if (mime === "image/png") bytes = stripPngLocation(bytes).bytes;
-    const expires_at = parseExpiry(expiresRaw);
+    const expires_at = pub ? publicExpiry(expiresRaw) : parseExpiry(expiresRaw);
     if (expires_at === undefined) return err(400, "invalid expires (use 10m, 1h, 1d, 7d, 30d, 90d, 1y, never or e.g. 12h)");
-    it = Object.assign(baseItem(id, "file", expires_at), { r2_key: `f/${id}/${name}`, name, mime, size: bytes.length });
+    it = Object.assign(baseItem(id, "file", expires_at), { r2_key: `${pub ? PUBLIC_PREFIX : ""}f/${id}/${name}`, name, mime, size: bytes.length });
     await env.FILES.put(it.r2_key!, bytes, { httpMetadata: { contentType: mime }, customMetadata: { id } });
   } else {
     // raw streaming upload: PUT/POST /api/upload?filename=foo.mp4 with the bytes as body
+    if (pub) return err(415, "send the file as multipart/form-data");
     const len = Number(req.headers.get("content-length") || 0);
     if (!len || !req.body) return err(411, "content-length required for raw uploads");
     if (len > Number(env.MAX_STREAM_MB || 500) * 1024 * 1024) return err(413, "file too large");
@@ -210,12 +219,14 @@ async function handleUpload(req: Request, env: Env, ctx: ExecutionContext, p: Pr
     it.mime = effectiveType(declared, sniffed, first);
   }
   if (scan === "2") it.blocked = "scan failed";
+  // public files stay closed until the background scan (and, for images, the sensitive content check) has run
+  else if (pub) it.blocked = CHECKING;
   await saveItem(env, it, p);
   ctx.waitUntil(env.JOBS.send({ type: "scan", id }));
   return json(links(req, it), 201);
 }
 
-async function handlePaste(req: Request, env: Env, p: Principal) {
+async function handlePaste(req: Request, env: Env, p: Principal, pub?: PublicLimits) {
   const ct = req.headers.get("content-type") || "";
   let content = "", lang = "", title = "", expires: string | null = new URL(req.url).searchParams.get("expires") || req.headers.get("x-expires");
   if (ct.includes("application/json")) {
@@ -234,12 +245,13 @@ async function handlePaste(req: Request, env: Env, p: Principal) {
   }
   if (!content) return err(400, "empty paste");
   if (content.length > 10 * 1024 * 1024) return err(413, "paste too large (10 MB)");
-  const expires_at = parseExpiry(expires);
+  if (pub && new TextEncoder().encode(content).length > pub.pasteBytes) return err(413, `without a token, pastes are limited to ${Math.round(pub.pasteBytes / 1024)} KB`);
+  const expires_at = pub ? publicExpiry(expires) : parseExpiry(expires);
   if (expires_at === undefined) return err(400, "invalid expires");
-  const id = await newId(env);
+  const id = await newId(env, pub ? PUBLIC_ID_LENGTH : 5);
   const it = baseItem(id, "paste", expires_at);
   const name = sanitizeName(title || `${id}.${lang || "txt"}`);
-  Object.assign(it, { r2_key: `p/${id}.txt`, name, mime: "text/plain; charset=utf-8", size: new TextEncoder().encode(content).length, lang: lang.replace(/[^a-z0-9+#-]/gi, "").slice(0, 20) || null });
+  Object.assign(it, { r2_key: `${pub ? PUBLIC_PREFIX : ""}p/${id}.txt`, name, mime: "text/plain; charset=utf-8", size: new TextEncoder().encode(content).length, lang: lang.replace(/[^a-z0-9+#-]/gi, "").slice(0, 20) || null });
   await env.FILES.put(it.r2_key!, content, { httpMetadata: { contentType: "text/plain; charset=utf-8" } });
   await saveItem(env, it, p);
   return json(links(req, it), 201);
@@ -285,8 +297,9 @@ async function handleList(req: Request, env: Env, p: Principal) {
   const limit = Math.min(Number(u.searchParams.get("limit") || 50), 200);
   const offset = Math.max(0, Math.floor(Number(u.searchParams.get("offset")) || 0));
   const kind = u.searchParams.get("kind");
-  // every token sees only its own history; the links themselves stay public
-  const own = ownerFilter(p);
+  // every token sees only its own history; the links themselves stay public.
+  // The master token can also look at uploads without a token (?scope=public), to moderate them.
+  const own = p.master && u.searchParams.get("scope") === "public" ? { sql: "owner = ?", args: [PUBLIC_OWNER] } : ownerFilter(p);
   const stmt = kind
     ? env.DB.prepare(`SELECT * FROM items WHERE ${own.sql} AND kind = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(...own.args, kind, limit, offset)
     : env.DB.prepare(`SELECT * FROM items WHERE ${own.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(...own.args, limit, offset);
@@ -466,7 +479,7 @@ async function analyze(env: Env, id: string) {
     }
   }
   if (thumb) {
-    it.thumb_key = `t/${id}.webp`;
+    it.thumb_key = `${it.owner === PUBLIC_OWNER ? PUBLIC_PREFIX : ""}t/${id}.webp`;
     await env.FILES.put(it.thumb_key, thumb, { httpMetadata: { contentType: "image/webp" } });
   }
   if (!aiInput && it.size < 4 * 1024 * 1024 && /jpeg|png|webp/.test(it.mime || "")) {
@@ -493,6 +506,12 @@ async function analyze(env: Env, id: string) {
     } catch (e) { console.warn("nsfw check failed", id, String(e)); }
   }
   await env.DB.prepare("UPDATE items SET thumb_key = ?, alt = ?, nsfw = ?, width = ?, height = ? WHERE id = ?").bind(it.thumb_key, it.alt, it.nsfw, it.width ?? null, it.height ?? null, id).run();
+  // a public image opens only once the sensitive content check is done, and stays on hold if it flagged the image
+  if (it.blocked === CHECKING) {
+    it.blocked = it.nsfw === 1 ? "flagged as sensitive" : null;
+    await env.DB.prepare("UPDATE items SET blocked = ? WHERE id = ?").bind(it.blocked, id).run();
+    if (it.blocked) console.warn("file on hold", id, it.blocked);
+  }
   await cacheItem(env, it);
 }
 
@@ -506,7 +525,8 @@ async function scanFile(env: Env, id: string) {
   const ds = new crypto.DigestStream("SHA-256");
   await obj.body.pipeTo(ds);
   const sha256 = [...new Uint8Array(await ds.digest)].map((x) => x.toString(16).padStart(2, "0")).join("");
-  let blocked = it.blocked ?? null;
+  // "checking" is the placeholder of a public upload that hasn't been scanned yet
+  let blocked = it.blocked === CHECKING ? null : it.blocked ?? null;
 
   if (!blocked && it.mime === "application/zip") {
     const tailLen = Math.min(it.size, 4 * 1024 * 1024);
@@ -532,10 +552,13 @@ async function scanFile(env: Env, id: string) {
     }
   }
 
+  // public images wait for the sensitive content check in `analyze`, which needs Workers AI
+  if (!blocked && it.blocked === CHECKING && env.AI && IMAGE_TYPES.test(it.mime || "")) blocked = CHECKING;
   await env.DB.prepare("UPDATE items SET sha256 = ?, blocked = ? WHERE id = ?").bind(sha256, blocked, id).run();
   Object.assign(it, { sha256, blocked });
   await cacheItem(env, it);
-  if (blocked) console.warn("file on hold", id, blocked);
+  if (blocked === CHECKING) await analyze(env, id);
+  else if (blocked) console.warn("file on hold", id, blocked);
   else if (IMAGE_TYPES.test(it.mime || "")) await analyze(env, id);
 }
 
@@ -546,6 +569,33 @@ async function cleanup(env: Env) {
     if (!results.length) break;
     for (const it of results) await deleteItem(env, it);
   }
+  // daily counters of public uploads are only needed for the current day
+  await env.DB.prepare("DELETE FROM public_usage WHERE day < ?").bind(utcDay() - 1).run().catch(() => null); // table missing until migration 0007
+}
+
+// ---------- public uploads (no token) ----------
+async function handlePublic(req: Request, env: Env, ctx: ExecutionContext, url: URL, kind: "upload" | "paste"): Promise<Response> {
+  if (!publicEnabled(env)) return err(404, "unknown endpoint");
+  if (req.method !== "POST") return err(405, "method not allowed");
+  const lim = publicLimits(env);
+  if (env.PUB_RL && !(await env.PUB_RL.limit({ key: ip(req) })).success) return err(429, "too many uploads, wait a minute");
+  const len = Number(req.headers.get("content-length") || 0);
+  if (!len || !req.body) return err(411, "content-length required");
+  if (kind === "upload" && !(req.headers.get("content-type") || "").startsWith("multipart/form-data")) return err(415, "send the file as multipart/form-data");
+  if (kind === "paste" && len > lim.pasteBytes * 6 + 65536) return err(413, `without a token, pastes are limited to ${Math.round(lim.pasteBytes / 1024)} KB`);
+  const day = utcDay();
+  const key = await usageKey(ip(req), day, env.API_TOKEN || env.TURNSTILE_SECRET!);
+  const used = await env.DB.prepare("SELECT uploads, bytes FROM public_usage WHERE key = ? AND day = ?").bind(key, day).first<{ uploads: number; bytes: number }>();
+  if (!withinDailyCap(used, len, lim)) return err(429, "That\u2019s today\u2019s limit for uploads without a token. Try again tomorrow.");
+  // every upload needs its own Turnstile check, solved on this site for this action
+  if (!(await verifyTurnstile(env.TURNSTILE_SECRET!, req.headers.get("x-turnstile") || "", req.headers.get("cf-connecting-ip"), fetch, PUBLIC_ACTION, url.hostname)))
+    return err(403, "We couldn\u2019t confirm you\u2019re a person. Try again.");
+  const who: Principal = { token: "", owner: PUBLIC_OWNER, master: false };
+  const res = kind === "upload" ? await handleUpload(req, env, ctx, who, lim) : await handlePaste(req, env, who, lim);
+  if (res.status === 201)
+    await env.DB.prepare("INSERT INTO public_usage (key, day, uploads, bytes) VALUES (?, ?, 1, ?) ON CONFLICT (key, day) DO UPDATE SET uploads = uploads + 1, bytes = bytes + excluded.bytes")
+      .bind(key, day, len).run();
+  return res;
 }
 
 // ---------- router ----------
@@ -575,7 +625,12 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const m = req.method;
 
   if (m === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
-  if (path === "/" && (m === "GET" || m === "HEAD")) return new Response(landingPage(url.host, { multiMb: Number(env.MAX_MULTIPART_MB || 95), maxMb: Number(env.MAX_STREAM_MB || 500) }, url.origin), { headers: htmlHeaders("public, max-age=300") });
+  if (path === "/" && (m === "GET" || m === "HEAD")) {
+    const pub = publicEnabled(env) ? publicLimits(env) : null;
+    const lim = { multiMb: Number(env.MAX_MULTIPART_MB || 95), maxMb: Number(env.MAX_STREAM_MB || 500), ...(pub ? { pub: { siteKey: env.TURNSTILE_SITE_KEY!, maxMb: Math.round(pub.maxBytes / 1048576), pasteKb: Math.round(pub.pasteBytes / 1024) } } : {}) };
+    // with public uploads on, the start page carries the Turnstile widget
+    return new Response(landingPage(url.host, lim, url.origin), { headers: { ...htmlHeaders("public, max-age=300"), ...(pub ? { "content-security-policy": REQUEST_CSP } : {}) } });
+  }
   // SEO: only the landing page is meant to be found; uploads carry X-Robots-Tag: noindex (see fetch below).
   if (path === "/robots.txt") return new Response(robotsTxt(url.origin), { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } });
   if (path === "/sitemap.xml") return new Response(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${url.origin}/</loc><changefreq>monthly</changefreq></url></urlset>\n`, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=3600" } });
@@ -592,7 +647,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (LEGAL_PATHS[path] && (m === "GET" || m === "HEAD")) {
     const legal = parseLegal(env.LEGAL);
     if (!legal) return notFound();
-    return new Response(legalPage(LEGAL_PATHS[path], legal, { malwareLookup: !!env.MB_AUTH_KEY, abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET) }), { headers: htmlHeaders("public, max-age=3600") });
+    return new Response(legalPage(LEGAL_PATHS[path], legal, { malwareLookup: !!env.MB_AUTH_KEY, abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env) }), { headers: htmlHeaders("public, max-age=3600") });
   }
 
   if (env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET && (path === "/request" || path.startsWith("/request/"))) {
@@ -605,6 +660,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     }
     return err(405, "method not allowed");
   }
+
+  if (path === "/api/public/upload" || path === "/api/public/paste") return handlePublic(req, env, ctx, url, path === "/api/public/upload" ? "upload" : "paste");
 
   if (path.startsWith("/api/")) {
     const who = await authenticate(req, env, ctx);
@@ -655,6 +712,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     const it = await getItem(env, v[1]);
     if (!it) return (await missLimited(req, env)) ?? notFound();
     const sub = v[2];
+    if (it.blocked === CHECKING) return new Response(checkingPage(), { status: 503, headers: { ...htmlHeaders("no-store"), "retry-after": "5" } });
     if (it.blocked) return new Response(heldPage(), { status: 451, headers: htmlHeaders("no-store") });
     // "/id.png" (ShareX-style direct link) behaves like /id/raw
     const direct = !sub && path.includes(".");
@@ -677,7 +735,7 @@ function corsHeaders() {
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
     try {
-      configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), brand: brandFrom(env) });
+      configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env), brand: brandFrom(env) });
       const res = await route(req, env, ctx);
       const path = new URL(req.url).pathname;
       if (INDEXABLE.has(path) || path.startsWith("/assets/")) return res;
