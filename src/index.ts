@@ -6,7 +6,7 @@
 import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, deletePage, legalPage, configureUi, requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "./ui.js";
 import { CLAIM_WINDOW, KEEP_REQUESTS, MAX_PENDING, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile, type RequestRow } from "./requests";
 import { sniff, blockReason, effectiveType, INLINE_TYPES, stripJpegLocation, stripPngLocation, inspectZip } from "./safety";
-import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName } from "./util";
+import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName, robotsTxt } from "./util";
 
 export interface Env {
   FILES: R2Bucket;
@@ -570,7 +570,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (m === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
   if (path === "/" && (m === "GET" || m === "HEAD")) return new Response(landingPage(url.host, { multiMb: Number(env.MAX_MULTIPART_MB || 95), maxMb: Number(env.MAX_STREAM_MB || 500) }), { headers: htmlHeaders("public, max-age=300") });
   // SEO: only the landing page is meant to be found; uploads carry X-Robots-Tag: noindex (see fetch below).
-  if (path === "/robots.txt") return new Response(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /d/\nDisallow: /request/\n\nSitemap: ${url.origin}/sitemap.xml\n`, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } });
+  if (path === "/robots.txt") return new Response(robotsTxt(url.origin), { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } });
   if (path === "/sitemap.xml") return new Response(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${url.origin}/</loc><changefreq>monthly</changefreq></url></urlset>\n`, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=3600" } });
   if (path === "/og.png") {
     const og = await env.FILES.get("_static/og.png");

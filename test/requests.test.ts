@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CLAIM_WINDOW, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile } from "../src/requests";
-import { isNamedToken, sha256Hex } from "../src/util";
+import { isNamedToken, robotsTxt, sha256Hex } from "../src/util";
 import { requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "../src/html";
 
 const form = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.append(k, v); return f; };
@@ -81,5 +81,15 @@ describe("request pages", () => {
     expect(tokenShownPage("drop_secret", null)).toContain("drop_secret");
     expect(requestStatusPage("approved")).toContain('<form method="post">');
     for (const s of ["pending", "rejected", "claimed", "lapsed"] as const) expect(requestStatusPage(s)).not.toContain("<form");
+  });
+});
+
+describe("robotsTxt", () => {
+  const txt = robotsTxt("https://drop.example");
+  it("allows search but not AI training", () => {
+    expect(txt).toContain("Content-Signal: search=yes, ai-input=yes, ai-train=no");
+    expect(txt).toMatch(/User-agent: GPTBot\n[\s\S]*User-agent: Diffbot\nDisallow: \/\n/);
+    expect(txt).toContain("Disallow: /request/");
+    expect(txt).toContain("Sitemap: https://drop.example/sitemap.xml");
   });
 });

@@ -66,3 +66,21 @@ export function sanitizeName(name: string) {
   return name.replace(/[\u0000-\u001f\/\\"]/g, "_").slice(0, 200) || "file";
 }
 
+/** Search and AI answer engines are welcome; training AI models on drop's pages is not. */
+const AI_TRAINING_BOTS = ["GPTBot", "ClaudeBot", "anthropic-ai", "CCBot", "Google-Extended", "Applebot-Extended", "Bytespider", "Amazonbot", "meta-externalagent", "cohere-ai", "MistralAI-Training", "Diffbot"];
+export const robotsTxt = (origin: string) =>
+  [
+    "# Search engines and AI answer engines are welcome. Training AI models on this site is not allowed.",
+    "User-agent: *",
+    "Content-Signal: search=yes, ai-input=yes, ai-train=no",
+    "Allow: /",
+    "Disallow: /api/",
+    "Disallow: /d/",
+    "Disallow: /request/",
+    "",
+    ...AI_TRAINING_BOTS.map((b) => `User-agent: ${b}`),
+    "Disallow: /",
+    "",
+    `Sitemap: ${origin}/sitemap.xml`,
+    "",
+  ].join("\n");
