@@ -328,7 +328,10 @@ const meta=[it.id,it.kind==='link'?null:fs(it.size),it.views+(it.views===1?' vie
 const mm=document.createElement('div');mm.className='mm';mm.textContent=meta;c1.append(mm);
 const c3=td(''),x=document.createElement('button');x.className='x';x.type='button';x.textContent='Delete';x.setAttribute('aria-label','Delete '+(it.name||it.id));x.onclick=()=>del(tr,it);c3.append(x);tr.append(c0,c1,td('m',meta),c3);return tr}
 async function load(more){if(!tok)return;if(!more)off=0;const k=$('#kind').value;let r;try{r=await fetch('/api/list?limit='+PAGE+'&offset='+off+(k?'&kind='+k:''),{headers:A()})}catch(e){return}
-if(r.status===401){R.classList.remove('authed');R.classList.add('want');$('#tokerr').textContent=BAD;return}if(!r.ok)return;const d=await r.json();
+if(r.status===401){R.classList.remove('authed');R.classList.add('want');
+// with public uploads on, a saved token that stopped working is forgotten, so uploads quietly go on without one
+if(PUB){tok='';try{localStorage.removeItem('drop_token')}catch(e){}$('#tokerr').textContent='Your saved token doesn\u2019t work anymore, so it was removed. You can still upload without one.';return}
+$('#tokerr').textContent=BAD;return}if(!r.ok)return;const d=await r.json();
 stats(d.stats);const tb=$('#list tbody');if(!more)tb.replaceChildren();for(const it of d.items)tb.append(item(it));off+=d.items.length;$('#more').hidden=d.items.length<PAGE;$('#empty').hidden=tb.children.length>0;$('#empty').textContent={file:'No files yet.',paste:'No pastes yet.',link:'No links yet.'}[k]||'Nothing uploaded yet.'}
 async function refresh(){try{const r=await fetch('/api/list?limit=1',{headers:A()});if(r.ok)stats((await r.json()).stats)}catch(e){}}
 $('#kind').onchange=()=>load();$('#reload').onclick=()=>load();$('#more').onclick=()=>load(true);
