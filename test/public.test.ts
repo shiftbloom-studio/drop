@@ -175,14 +175,27 @@ describe("public uploads on Node.js", () => {
     }
   });
 
-  it("serves public PDFs only as sandboxed downloads", async () => {
+  it("takes only what it can check, under a name that fits", async () => {
     const pdf = "%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n";
-    const j = await (await up(pdf, "doc.pdf")).json() as { id: string; raw: string };
-    await drop.queue.idle();
-    const r = await realFetch(j.raw);
-    expect(r.status).toBe(200);
-    expect(r.headers.get("content-disposition")).toMatch(/^attachment/);
-    expect(r.headers.get("content-security-policy")).toContain("sandbox");
+    expect((await up(pdf, "doc.pdf")).status).toBe(415);
+    expect((await up(new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0, 0, 0, 0]), "clip.mp4")).status).toBe(415);
+    expect((await up(new Uint8Array([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0]), "song.mp3")).status).toBe(415);
+    expect((await up(new Uint8Array([0, 0, 1, 0, 1, 0, 16, 16]), "favicon.ico")).status).toBe(415);
+    expect((await up("plain words", "notes.zip")).status).toBe(415);
+    // a damaged image is refused, an archive appended to a good one is cut off
+    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+    expect((await up(png, "dot.jpg")).status).toBe(415);
+    expect((await up(png.subarray(0, 40), "dot.png")).status).toBe(422);
+    const bomb = Uint8Array.from(atob("R0lGODlhABAAEIAAAAAAAP///yH5BAwAAAAALAAAAAAAEAAQAAICRAEAIfkEDAAAAAAsAAAAAAAQABAAAgJEAQA7"), (c) => c.charCodeAt(0));
+    expect((await up(bomb, "bomb.gif")).status).toBe(413);
+    const apng = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAACGFjVEwAAAACAAAAAPONk3AAAAAaZmNUTAAAAAAAAAAIAAAACAAAAAAAAAAAAAEAFAAA5PY0GAAAABJJREFUeJxj/M+AHTDhEB+kEgDNQQEP6EHibwAAABpmY1RMAAAAAQAAAAgAAAAIAAAAAAAAAAAAAQAUAAB/hd7MAAAAF2ZkQVQAAAACeJxjZPjPgBUwYRcerBIAzEIBD4VMhLYAAAAASUVORK5CYII="), (c) => c.charCodeAt(0));
+    expect((await up(apng, "moving.png")).status).toBe(415);
+    const tail = new Uint8Array([0x50, 0x4b, 3, 4, 9, 9, 9, 9]);
+    const both = new Uint8Array(png.length + tail.length); both.set(png); both.set(tail, png.length);
+    const r = await up(both, "dot.png");
+    expect(r.status).toBe(201);
+    const { id } = await r.json() as { id: string };
+    expect((await drop.env.DB.prepare("SELECT size FROM items WHERE id = ?").bind(id).first<{ size: number }>())?.size).toBe(png.length);
   });
 
   it("keeps public images on hold unless the sensitive content check answered no", async () => {
@@ -214,7 +227,7 @@ describe("public uploads on Node.js", () => {
     expect(await blocked(b.id)).toBeNull();
     expect(await status(b.id)).toBe(200);
     // an image type the check can't read (GIF without the Images binding) stays on hold
-    const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 0, 1, 0, 0, 0, 0, 0x3b]);
+    const gif = Uint8Array.from(atob("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"), (c) => c.charCodeAt(0));
     const c = await (await up(gif, "c.gif")).json() as { id: string };
     await drop.queue.idle();
     expect(await blocked(c.id)).toBe("not checked");
