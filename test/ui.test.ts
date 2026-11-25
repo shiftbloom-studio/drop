@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bloom, faviconSvg, landingPage, notFoundPage, viewPage } from "../src/html";
+import { bloom, deletePage, faviconSvg, landingPage, legalPage, notFoundPage, viewPage } from "../src/html";
 import type { Item } from "../src/index";
 
 const item = (over: Partial<Item> = {}): Item => ({
@@ -56,5 +56,18 @@ describe("pages", () => {
     const html = viewPage(item({ expires_at: 1_790_003_600 }), links, null);
     expect(html).toContain('<time datetime="');
     expect(html).toContain('name="robots" content="noindex"');
+  });
+  it("renders legal pages in both languages from config only", () => {
+    const l = { name: "Ada <Admin>", street: "Street 1", city: "12345 Town", country: { en: "Germany", de: "Deutschland" }, email: "a@example.com", authority: "Some Authority" };
+    const de = legalPage("datenschutz", l, { malwareLookup: true, abuseEmail: null });
+    expect(de).toContain('<html lang="de">');
+    expect(de).toContain("Ada &lt;Admin&gt;");
+    expect(de).toContain("MalwareBazaar");
+    expect(legalPage("privacy", l, { malwareLookup: false, abuseEmail: null })).not.toContain("MalwareBazaar");
+    expect(legalPage("imprint", l, { malwareLookup: false, abuseEmail: null })).toContain("§ 5 DDG");
+  });
+  it("asks before deleting", () => {
+    expect(deletePage("x.png", false)).toContain('<form method="post">');
+    expect(deletePage("<b>", true)).toContain("&lt;b&gt;");
   });
 });

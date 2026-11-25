@@ -3,8 +3,9 @@
  * Storage: R2 (blobs + thumbnails), D1 (metadata, source of truth), KV (hot lookup cache for short ids).
  * Background: Queue consumer builds thumbnails (Images binding) and alt text + NSFW flag (Workers AI).
  */
-import { landingPage, viewPage, notFoundPage, handleAsset } from "./ui.js";
-import { THUMB_TYPES, randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, sanitizeName } from "./util";
+import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, deletePage, legalPage, configureUi } from "./ui.js";
+import { sniff, blockReason, effectiveType, INLINE_TYPES, stripJpegLocation, stripPngLocation, inspectZip } from "./safety";
+import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, sanitizeName } from "./util";
 
 export interface Env {
   FILES: R2Bucket;
@@ -17,6 +18,15 @@ export interface Env {
   MAX_MULTIPART_MB?: string;
   MAX_STREAM_MB?: string;
   AI_MODEL?: string;
+  /** Rate limiters (optional): failed token attempts and unknown ids, both per IP. */
+  AUTH_RL?: RateLimit;
+  MISS_RL?: RateLimit;
+  /** abuse.ch MalwareBazaar Auth-Key. When set, the SHA-256 of every upload is checked against it. */
+  MB_AUTH_KEY?: string;
+  /** Address for "Report this file" links. Hidden when unset. */
+  ABUSE_EMAIL?: string;
+  /** Operator details for the imprint and privacy policy, as JSON. Legal pages are hidden when unset. */
+  LEGAL?: string;
 }
 
 type Kind = "file" | "paste" | "link";
@@ -38,8 +48,12 @@ export interface Item {
   views: number;
   width?: number | null;
   height?: number | null;
+  /** Why the file is on hold (quarantine), or null. */
+  blocked?: string | null;
+  sha256?: string | null;
 }
-type Job = { type: "analyze"; id: string };
+type Job = { type: "analyze" | "scan"; id: string };
+const IMAGE_TYPES = /^image\/(jpeg|png|gif|webp|avif|bmp)$/;
 
 // ---------- helpers ----------
 const json = (data: unknown, status = 200, headers: HeadersInit = {}) =>
@@ -58,7 +72,7 @@ function links(req: Request, it: Item) {
     kind: it.kind,
     url: `${b}/${it.id}`,
     raw: it.kind === "link" ? it.target : `${b}/${it.id}/raw${ext ? "." + ext : ""}`,
-    thumbnail: it.kind === "file" && THUMB_TYPES.test(it.mime || "") ? `${b}/${it.id}/thumb` : null,
+    thumbnail: it.kind === "file" && IMAGE_TYPES.test(it.mime || "") ? `${b}/${it.id}/thumb` : null,
     delete: `${b}/d/${it.id}/${it.delete_token}`,
     expires_at: it.expires_at ? new Date(it.expires_at * 1000).toISOString() : null,
   };
@@ -77,9 +91,9 @@ async function newId(env: Env) {
 
 async function saveItem(env: Env, it: Item) {
   await env.DB.prepare(
-    `INSERT INTO items (id, kind, r2_key, name, mime, size, target, lang, created_at, expires_at, delete_token, thumb_key, alt, nsfw, views)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`
-  ).bind(it.id, it.kind, it.r2_key, it.name, it.mime, it.size, it.target, it.lang, it.created_at, it.expires_at, it.delete_token, it.thumb_key, it.alt, it.nsfw).run();
+    `INSERT INTO items (id, kind, r2_key, name, mime, size, target, lang, created_at, expires_at, delete_token, thumb_key, alt, nsfw, views, blocked)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)`
+  ).bind(it.id, it.kind, it.r2_key, it.name, it.mime, it.size, it.target, it.lang, it.created_at, it.expires_at, it.delete_token, it.thumb_key, it.alt, it.nsfw, it.blocked ?? null).run();
   await cacheItem(env, it);
 }
 
@@ -116,11 +130,22 @@ function baseItem(id: string, kind: Kind, expires_at: number | null): Item {
 }
 
 // ---------- API handlers ----------
+const BLOCK_MSG: Record<string, (n: string) => string> = {
+  program: (n) => `${n} is a program, script or installer. drop doesn\u2019t host those.`,
+  macro: (n) => `${n} is an Office file with macros. Save it without macros and try again.`,
+  malware: (n) => `${n} was flagged as malware and wasn\u2019t saved.`,
+};
+
 async function handleUpload(req: Request, env: Env, ctx: ExecutionContext) {
   const url = new URL(req.url);
   const ct = req.headers.get("content-type") || "";
-  let body: ReadableStream | ArrayBuffer, name: string, mime: string, size: number;
   let expiresRaw = req.headers.get("x-expires") || url.searchParams.get("expires");
+  // set by Cloudflare's malicious uploads detection (managed transform) when the zone has it
+  const scan = req.headers.get("malicious-uploads-detection");
+
+  let name: string, declared: string;
+  const id = await newId(env);
+  let it: Item;
 
   if (ct.startsWith("multipart/form-data")) {
     const max = Number(env.MAX_MULTIPART_MB || 95) * 1024 * 1024;
@@ -132,32 +157,50 @@ async function handleUpload(req: Request, env: Env, ctx: ExecutionContext) {
     const file = f as File;
     expiresRaw = (form.get("expires") as string | null) || expiresRaw;
     name = sanitizeName(file.name || "upload");
-    mime = file.type || "application/octet-stream";
-    size = file.size;
-    body = await file.arrayBuffer();
+    declared = file.type;
+    let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer());
+    if (bytes.length === 0) return err(400, "empty file");
+    const sniffed = sniff(bytes.subarray(0, 4100));
+    const reason = scan === "1" ? "malware" : blockReason(name, sniffed);
+    if (reason) return err(422, BLOCK_MSG[reason](name));
+    const mime = effectiveType(declared, sniffed, bytes.subarray(0, 1024));
+    if (mime === "image/jpeg") bytes = stripJpegLocation(bytes).bytes;
+    else if (mime === "image/png") bytes = stripPngLocation(bytes).bytes;
+    const expires_at = parseExpiry(expiresRaw);
+    if (expires_at === undefined) return err(400, "invalid expires (use 10m, 1h, 1d, 7d, 30d, 90d, 1y, never or e.g. 12h)");
+    it = Object.assign(baseItem(id, "file", expires_at), { r2_key: `f/${id}/${name}`, name, mime, size: bytes.length });
+    await env.FILES.put(it.r2_key!, bytes, { httpMetadata: { contentType: mime }, customMetadata: { id } });
   } else {
     // raw streaming upload: PUT/POST /api/upload?filename=foo.mp4 with the bytes as body
     const len = Number(req.headers.get("content-length") || 0);
     if (!len || !req.body) return err(411, "content-length required for raw uploads");
     if (len > Number(env.MAX_STREAM_MB || 500) * 1024 * 1024) return err(413, "file too large");
     name = sanitizeName(url.searchParams.get("filename") || req.headers.get("x-filename") || "upload");
-    mime = ct.split(";")[0] || "application/octet-stream";
-    size = len;
-    body = req.body.pipeThrough(new FixedLengthStream(len));
+    declared = ct.split(";")[0];
+    const pre = blockReason(name, null);
+    if (pre || scan === "1") return err(422, BLOCK_MSG[pre || "malware"](name));
+    const expires_at = parseExpiry(expiresRaw);
+    if (expires_at === undefined) return err(400, "invalid expires (use 10m, 1h, 1d, 7d, 30d, 90d, 1y, never or e.g. 12h)");
+    // keep the first bytes while streaming to R2, so the type can be checked without buffering
+    const head = new Uint8Array(4100);
+    let got = 0;
+    const tap = new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, c) {
+        if (got < head.length) { const n = Math.min(chunk.length, head.length - got); head.set(chunk.subarray(0, n), got); got += n; }
+        c.enqueue(chunk);
+      },
+    });
+    it = Object.assign(baseItem(id, "file", expires_at), { r2_key: `f/${id}/${name}`, name, mime: "application/octet-stream", size: len });
+    await env.FILES.put(it.r2_key!, req.body.pipeThrough(tap).pipeThrough(new FixedLengthStream(len)), { customMetadata: { id } });
+    const first = head.subarray(0, got);
+    const sniffed = sniff(first);
+    const reason = blockReason(name, sniffed);
+    if (reason) { await env.FILES.delete(it.r2_key!); return err(422, BLOCK_MSG[reason](name)); }
+    it.mime = effectiveType(declared, sniffed, first);
   }
-  if (size === 0) return err(400, "empty file");
-  const expires_at = parseExpiry(expiresRaw);
-  if (expires_at === undefined) return err(400, "invalid expires (use 10m, 1h, 1d, 7d, 30d, 90d, 1y, never or e.g. 12h)");
-
-  const id = await newId(env);
-  const it = baseItem(id, "file", expires_at);
-  Object.assign(it, { r2_key: `f/${id}/${name}`, name, mime, size });
-  await env.FILES.put(it.r2_key!, body, {
-    httpMetadata: { contentType: mime, contentDisposition: `inline; filename="${name}"` },
-    customMetadata: { id },
-  });
+  if (scan === "2") it.blocked = "scan failed";
   await saveItem(env, it);
-  if (THUMB_TYPES.test(mime)) ctx.waitUntil(env.JOBS.send({ type: "analyze", id }));
+  ctx.waitUntil(env.JOBS.send({ type: "scan", id }));
   return json(links(req, it), 201);
 }
 
@@ -234,24 +277,24 @@ async function handleList(req: Request, env: Env) {
     : env.DB.prepare("SELECT * FROM items ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(limit, offset);
   const { results } = await stmt.all<Item>();
   const stats = await env.DB.prepare("SELECT kind, COUNT(*) n, COALESCE(SUM(size),0) bytes FROM items GROUP BY kind").all();
-  return json({ items: results.map((it) => ({ ...links(req, it), name: it.name, mime: it.mime, size: it.size, alt: it.alt, nsfw: it.nsfw, views: it.views, created_at: new Date(it.created_at * 1000).toISOString() })), stats: stats.results });
+  return json({ items: results.map((it) => ({ ...links(req, it), name: it.name, mime: it.mime, size: it.size, alt: it.alt, nsfw: it.nsfw, views: it.views, blocked: it.blocked ?? null, created_at: new Date(it.created_at * 1000).toISOString() })), stats: stats.results });
 }
 
 // ---------- public views ----------
 function safeRawHeaders(it: Item, obj: R2ObjectBody | R2Object, download: boolean) {
   const h = new Headers();
-  obj.writeHttpMetadata(h);
   h.set("etag", obj.httpEtag);
   h.set("accept-ranges", "bytes");
   h.set("x-content-type-options", "nosniff");
   h.set("cache-control", it.expires_at ? "public, max-age=300" : "public, max-age=86400");
-  // never let uploaded content run as active content on our origin
-  const mime = (it.mime || "").toLowerCase();
-  if (/html|xml|svg|javascript|ecmascript/.test(mime)) {
-    h.set("content-security-policy", "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'");
-    if (/html|javascript|ecmascript/.test(mime)) h.set("content-type", "text/plain; charset=utf-8");
-  }
-  h.set("content-disposition", `${download ? "attachment" : "inline"}; filename="${it.name || it.id}"`);
+  // Only an allowlist of passive types is shown inline; everything else (html, svg, scripts, archives,
+  // unknown binaries) is a download as application/octet-stream, so nothing uploaded can run on our origin.
+  const mime = (it.mime || "").toLowerCase().split(";")[0].trim();
+  const inline = INLINE_TYPES.has(mime) && !download;
+  h.set("content-type", !INLINE_TYPES.has(mime) ? "application/octet-stream" : mime === "text/plain" ? "text/plain; charset=utf-8" : mime);
+  if (mime !== "application/pdf") h.set("content-security-policy", "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'");
+  const fname = (it.name || it.id).replace(/[^\x20-\x7e]/g, "_");
+  h.set("content-disposition", `${inline ? "inline" : "attachment"}; filename="${fname}"; filename*=UTF-8''${encodeURIComponent(it.name || it.id)}`);
   return h;
 }
 
@@ -278,12 +321,29 @@ async function serveThumb(req: Request, env: Env, it: Item) {
     const obj = await env.FILES.get(it.thumb_key);
     if (obj) return new Response(obj.body, { headers: { "content-type": "image/webp", "cache-control": "public, max-age=604800, immutable" } });
   }
-  if (it.kind === "file" && THUMB_TYPES.test(it.mime || "")) return serveRaw(req, env, it, false);
+  if (it.kind === "file" && IMAGE_TYPES.test(it.mime || "")) return serveRaw(req, env, it, false);
   return notFound();
 }
 
 const PAGE_CSP = "default-src 'none'; img-src 'self' data: blob:; media-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self'; object-src 'self'; base-uri 'none'; form-action 'self'";
 const htmlHeaders = (cache: string) => ({ "content-type": "text/html; charset=utf-8", "cache-control": cache, "content-security-policy": PAGE_CSP, "x-content-type-options": "nosniff", "referrer-policy": "strict-origin-when-cross-origin" });
+const ip = (req: Request) => req.headers.get("cf-connecting-ip") || "unknown";
+/** Guessing ids or deletion links: after too many misses per IP and minute, answer 429. */
+async function missLimited(req: Request, env: Env) {
+  if (env.MISS_RL && !(await env.MISS_RL.limit({ key: ip(req) })).success)
+    return new Response("Too many requests. Wait a minute.\n", { status: 429, headers: { "content-type": "text/plain; charset=utf-8", "retry-after": "60" } });
+  return null;
+}
+
+const LEGAL_PATHS: Record<string, "privacy" | "datenschutz" | "imprint" | "impressum"> = {
+  "/privacy": "privacy", "/datenschutz": "datenschutz", "/imprint": "imprint", "/impressum": "impressum",
+};
+export type Legal = { name: string; business?: string; street: string; city: string; country: { en: string; de: string }; email: string; phone?: string; vatId?: string; authority: string };
+function parseLegal(raw?: string): Legal | null {
+  if (!raw) return null;
+  try { const l = JSON.parse(raw) as Legal; return l.name && l.street && l.email ? l : null; } catch { return null; }
+}
+
 const notFound = () => new Response(notFoundPage(), { status: 404, headers: htmlHeaders("no-store") });
 
 async function serveView(req: Request, env: Env, ctx: ExecutionContext, it: Item) {
@@ -373,6 +433,49 @@ async function analyze(env: Env, id: string) {
   await cacheItem(env, it);
 }
 
+/** Background safety pass for every upload: content hash, archive contents, optional malware hash lookup.
+ * Runs on Cloudflare (Queue consumer), never on a local machine. Images go on to `analyze`. */
+async function scanFile(env: Env, id: string) {
+  const it = await env.DB.prepare("SELECT * FROM items WHERE id = ?").bind(id).first<Item>();
+  if (!it || !it.r2_key || it.kind !== "file") return;
+  const obj = await env.FILES.get(it.r2_key);
+  if (!obj) return;
+  const ds = new crypto.DigestStream("SHA-256");
+  await obj.body.pipeTo(ds);
+  const sha256 = [...new Uint8Array(await ds.digest)].map((x) => x.toString(16).padStart(2, "0")).join("");
+  let blocked = it.blocked ?? null;
+
+  if (!blocked && it.mime === "application/zip") {
+    const tailLen = Math.min(it.size, 4 * 1024 * 1024);
+    const tailObj = await env.FILES.get(it.r2_key, { range: { suffix: tailLen } });
+    if (tailObj && "body" in tailObj) {
+      const z = inspectZip(new Uint8Array(await tailObj.arrayBuffer()), it.size - tailLen);
+      if (z?.programs.length) blocked = `archive contains programs: ${z.programs.slice(0, 5).join(", ")}`;
+      else if (z?.encrypted) blocked = "encrypted archive";
+    }
+  }
+
+  if (!blocked && env.MB_AUTH_KEY) {
+    try {
+      const r = await fetch("https://mb-api.abuse.ch/api/v1/", {
+        method: "POST",
+        headers: { "auth-key": env.MB_AUTH_KEY, "content-type": "application/x-www-form-urlencoded" },
+        body: `query=get_info&hash=${sha256}`,
+      });
+      const j = (await r.json().catch(() => null)) as { query_status?: string; data?: { signature?: string }[] } | null;
+      if (j?.query_status === "ok") blocked = `known malware${j.data?.[0]?.signature ? `: ${j.data[0].signature}` : ""}`;
+    } catch (e) {
+      console.warn("malware lookup failed", id, String(e));
+    }
+  }
+
+  await env.DB.prepare("UPDATE items SET sha256 = ?, blocked = ? WHERE id = ?").bind(sha256, blocked, id).run();
+  Object.assign(it, { sha256, blocked });
+  await cacheItem(env, it);
+  if (blocked) console.warn("file on hold", id, blocked);
+  else if (IMAGE_TYPES.test(it.mime || "")) await analyze(env, id);
+}
+
 async function cleanup(env: Env) {
   const now = Math.floor(Date.now() / 1000);
   for (let round = 0; round < 10; round++) {
@@ -403,8 +506,18 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   }
   if (path === "/health") return json({ ok: true });
 
+  if (LEGAL_PATHS[path] && (m === "GET" || m === "HEAD")) {
+    const legal = parseLegal(env.LEGAL);
+    if (!legal) return notFound();
+    return new Response(legalPage(LEGAL_PATHS[path], legal, { malwareLookup: !!env.MB_AUTH_KEY, abuseEmail: env.ABUSE_EMAIL || null }), { headers: htmlHeaders("public, max-age=3600") });
+  }
+
   if (path.startsWith("/api/")) {
-    if (!isAuthed(req, env.API_TOKEN)) return err(401, "unauthorized: send Authorization: Bearer <token>");
+    if (!isAuthed(req, env.API_TOKEN)) {
+      // slow down token guessing: a handful of failed attempts per IP and minute, then 429
+      if (env.AUTH_RL && !(await env.AUTH_RL.limit({ key: ip(req) })).success) return err(429, "too many attempts, wait a minute");
+      return err(401, "unauthorized: send Authorization: Bearer <token>");
+    }
     if (path === "/api/upload" && (m === "POST" || m === "PUT")) return handleUpload(req, env, ctx);
     if (path === "/api/paste" && m === "POST") return handlePaste(req, env);
     if (path === "/api/shorten" && m === "POST") return handleShorten(req, env);
@@ -416,7 +529,13 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
       if (!it) return err(404, "not found");
       if (m === "DELETE") { await deleteItem(env, it); return json({ deleted: it.id }); }
       if (m === "GET") return json({ ...it, ...links(req, it) });
-      if (m === "POST" && url.searchParams.get("reanalyze") !== null) { await env.JOBS.send({ type: "analyze", id: it.id }); return json({ queued: it.id }); }
+      if (m === "POST" && url.searchParams.get("reanalyze") !== null) { await env.JOBS.send({ type: "scan", id: it.id }); return json({ queued: it.id }); }
+      if (m === "POST" && url.searchParams.get("release") !== null) {
+        await env.DB.prepare("UPDATE items SET blocked = NULL WHERE id = ?").bind(it.id).run();
+        it.blocked = null;
+        await cacheItem(env, it);
+        return json({ released: it.id });
+      }
     }
     return err(404, "unknown endpoint");
   }
@@ -424,16 +543,21 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const del = /^\/d\/([A-Za-z0-9]+)\/([A-Za-z0-9]+)$/.exec(path);
   if (del && (m === "GET" || m === "POST" || m === "DELETE")) {
     const it = await env.DB.prepare("SELECT * FROM items WHERE id = ?").bind(del[1]).first<Item>();
-    if (!it || !timingSafeEqual(it.delete_token, del[2])) return err(404, "not found");
+    if (!it || !timingSafeEqual(it.delete_token, del[2])) return (await missLimited(req, env)) ?? err(404, "not found");
+    // GET only asks: link previews and crawlers that open a deletion URL must not delete anything
+    if (m === "GET") return new Response(deletePage(it.name || it.id, false), { headers: htmlHeaders("no-store") });
     await deleteItem(env, it);
-    return new Response(`deleted ${it.id}\n`, { headers: { "content-type": "text/plain" } });
+    if (m === "DELETE") return new Response(`deleted ${it.id}\n`, { headers: { "content-type": "text/plain" } });
+    return new Response(deletePage(it.name || it.id, true), { headers: htmlHeaders("no-store") });
   }
+
 
   const v = /^\/([A-Za-z0-9]{3,16})(?:\.[A-Za-z0-9]{1,8})?(?:\/(raw|dl|thumb)(?:\.[A-Za-z0-9]{1,8})?)?$/.exec(path);
   if (v && (m === "GET" || m === "HEAD")) {
     const it = await getItem(env, v[1]);
-    if (!it) return notFound();
+    if (!it) return (await missLimited(req, env)) ?? notFound();
     const sub = v[2];
+    if (it.blocked) return new Response(heldPage(), { status: 451, headers: htmlHeaders("no-store") });
     // "/id.png" (ShareX-style direct link) behaves like /id/raw
     const direct = !sub && path.includes(".");
     if (sub === "thumb") return serveThumb(req, env, it);
@@ -446,7 +570,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   return notFound();
 }
 
-const INDEXABLE = new Set(["/", "/robots.txt", "/sitemap.xml", "/llms.txt", "/og.png", "/favicon.svg", "/favicon.ico"]);
+const INDEXABLE = new Set(["/", "/robots.txt", "/sitemap.xml", "/llms.txt", "/og.png", "/favicon.svg", "/favicon.ico"]); // legal pages carry their own noindex meta
 
 function corsHeaders() {
   return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "access-control-allow-headers": "authorization, content-type, x-expires, x-filename, x-api-key", "access-control-max-age": "86400" };
@@ -455,6 +579,7 @@ function corsHeaders() {
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
     try {
+      configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null });
       const res = await route(req, env, ctx);
       const path = new URL(req.url).pathname;
       if (INDEXABLE.has(path) || path.startsWith("/assets/")) return res;
@@ -471,7 +596,8 @@ export default {
   async queue(batch: MessageBatch<Job>, env: Env) {
     for (const msg of batch.messages) {
       try {
-        if (msg.body.type === "analyze") await analyze(env, msg.body.id);
+        if (msg.body.type === "scan") await scanFile(env, msg.body.id);
+        else if (msg.body.type === "analyze") await analyze(env, msg.body.id);
         msg.ack();
       } catch (e) {
         console.error("job failed", msg.body, String(e));

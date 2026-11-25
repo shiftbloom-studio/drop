@@ -12,7 +12,19 @@
   // "routes": [{ "pattern": "drop.example.com", "custom_domain": true }],
   // "workers_dev": false,
 
-  "vars": { "MAX_MULTIPART_MB": "95", "MAX_STREAM_MB": "500" },
+  "vars": {
+    "MAX_MULTIPART_MB": "95",
+    "MAX_STREAM_MB": "500"
+    // Optional: shows "Report this file" on item pages.
+    // "ABUSE_EMAIL": "abuse@example.com",
+    // Optional: operator details for /imprint, /impressum, /privacy and /datenschutz (hidden when unset).
+    // "LEGAL": "{\"name\":\"Jane Doe\",\"street\":\"Example St 1\",\"city\":\"12345 Town\",\"country\":{\"en\":\"Germany\",\"de\":\"Deutschland\"},\"email\":\"jane@example.com\",\"authority\":\"Your data protection authority, address\"}"
+  },
+  // Slow down token guessing and id enumeration (per IP and minute). Both are optional.
+  "ratelimits": [
+    { "name": "AUTH_RL", "namespace_id": "1101", "simple": { "limit": 10, "period": 60 } },
+    { "name": "MISS_RL", "namespace_id": "1102", "simple": { "limit": 60, "period": 60 } }
+  ],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "drop-files" }],
   "d1_databases": [{ "binding": "DB", "database_name": "drop-db", "database_id": "<your-d1-database-id>", "migrations_dir": "migrations" }],
   "kv_namespaces": [{ "binding": "LINKS", "id": "<your-kv-namespace-id>" }],

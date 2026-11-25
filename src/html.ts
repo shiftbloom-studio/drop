@@ -99,7 +99,7 @@ textarea{min-height:200px;font:13px/1.6 var(--mono);resize:vertical}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 `;
 
-const head = (title: string, extra = "", index = false) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+const head = (title: string, extra = "", index = false, lang = "en") => `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>${index ? "" : `<meta name="robots" content="noindex">`}<meta name="theme-color" content="#ffffff">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/fonts.css">${extra}<style>${css}`;
 
@@ -108,7 +108,11 @@ const topbar = (right = "") => `<header class="top"><a class="brand" href="/" ar
 /** AGPL §13: users interacting over a network must be offered the source. Forks: point this at your repo. */
 export const SOURCE_URL = "https://github.com/shiftbloom-studio/drop";
 
-const footer = () => `<footer class="foot"><p>drop is open source under AGPL-3.0. <a href="${SOURCE_URL}">Read the code</a></p><p><a class="sb" href="https://shiftbloom.studio">shiftbloom studio<i>.</i></a> · hamburg</p></footer>`;
+/** Set per request from the Worker's config: which optional links the pages show. */
+let UI: { legal: boolean; abuseEmail: string | null } = { legal: false, abuseEmail: null };
+export function configureUi(c: typeof UI) { UI = c; }
+
+const footer = (lang: "en" | "de" = "en") => `<footer class="foot"><p>${lang === "de" ? "drop ist Open Source unter AGPL-3.0." : "drop is open source under AGPL-3.0."} <a href="${SOURCE_URL}">${lang === "de" ? "Zum Code" : "Read the code"}</a>${UI.legal ? (lang === "de" ? ` · <a href="/datenschutz">Datenschutz</a> · <a href="/impressum">Impressum</a>` : ` · <a href="/privacy">Privacy</a> · <a href="/imprint">Imprint</a>`) : ""}</p><p><a class="sb" href="https://shiftbloom.studio">shiftbloom studio<i>.</i></a> · hamburg</p></footer>`;
 
 // ---------- landing ----------
 const SITE_TITLE = "drop. · shiftbloom studio";
@@ -127,7 +131,7 @@ function landingMeta(origin: string) {
     isAccessibleForFree: true,
     license: "https://www.gnu.org/licenses/agpl-3.0.html",
     offers: { "@type": "Offer", price: "0", priceCurrency: "EUR" },
-    publisher: { "@id": "https://shiftbloom.studio/#org" },
+    publisher: { "@type": "Organization", "@id": "https://shiftbloom.studio/#org", name: "shiftbloom studio", url: "https://shiftbloom.studio" },
     sameAs: [SOURCE_URL],
   };
   return `<meta name="description" content="${esc(SITE_DESC)}"><link rel="canonical" href="${esc(origin)}/">
@@ -245,7 +249,7 @@ const num=(n,d)=>n.toLocaleString('en-GB',{maximumFractionDigits:d});
 const fs=n=>{const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<3){n/=1024;i++}return num(n,i?1:0)+' '+u[i]};
 const when=s=>new Date(s).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
 const BAD='That token doesn’t work. Check API_TOKEN in your Worker secrets.';
-function why(st,b){if(st===401)return BAD;if(st===413&&/paste/.test((b&&b.error)||''))return'That’s more than 10 MB of text. Upload it as a file instead.';return st?'Something went wrong ('+st+'). Try again in a moment.':'You’re offline. Try again once you’re connected.'}
+function why(st,b){if(st===401)return BAD;if(st===422&&b&&b.error)return b.error;if(st===429)return'Too many tries. Wait a minute, then try again.';if(st===413&&/paste/.test((b&&b.error)||''))return'That’s more than 10 MB of text. Upload it as a file instead.';return st?'Something went wrong ('+st+'). Try again in a moment.':'You’re offline. Try again once you’re connected.'}
 
 // token
 function setMode(on){R.classList.toggle('authed',on);if(on){R.classList.remove('want');load()}}
@@ -298,7 +302,7 @@ function stats(s){let n=0,b=0,l=0;for(const x of s){if(x.kind==='link')l+=x.n;el
 const td=(c,t)=>{const e=document.createElement('td');if(c)e.className=c;if(t!=null)e.textContent=t;return e};
 async function del(tr,it){if(!confirm('Delete '+(it.name||it.id)+'? Its link stops working right away.'))return;tr.remove();try{await fetch('/api/items/'+it.id,{method:'DELETE',headers:A()})}catch(e){}refresh()}
 function item(it){const tr=document.createElement('tr'),c0=td('t');if(it.thumbnail){const i=document.createElement('img');i.src=it.thumbnail;i.loading='lazy';i.alt='';c0.append(i)}else{const s=document.createElement('span');s.textContent=it.kind==='paste'?'txt':it.kind==='link'?'url':(it.name||'').split('.').pop().slice(0,4);c0.append(s)}
-const c1=td('n'),a=document.createElement('a');a.href=it.url;a.target='_blank';a.rel='noopener';a.textContent=it.kind==='link'?it.raw:(it.name||it.id);c1.append(a);if(it.nsfw){const g=document.createElement('span');g.className='tag';g.textContent='sensitive';c1.append(g)}
+const c1=td('n'),a=document.createElement('a');a.href=it.url;a.target='_blank';a.rel='noopener';a.textContent=it.kind==='link'?it.raw:(it.name||it.id);c1.append(a);if(it.nsfw){const g=document.createElement('span');g.className='tag';g.textContent='sensitive';c1.append(g)}if(it.blocked){const g=document.createElement('span');g.className='tag';g.textContent='on hold';g.title=it.blocked;c1.append(g)}
 if(it.alt){const p=document.createElement('div');p.className='alt';p.textContent=it.alt;c1.append(p)}
 const meta=[it.id,it.kind==='link'?null:fs(it.size),it.views+(it.views===1?' view':' views'),it.expires_at?'expires '+when(it.expires_at):null].filter(Boolean).join(' · ');
 const mm=document.createElement('div');mm.className='mm';mm.textContent=meta;c1.append(mm);
@@ -322,7 +326,8 @@ export function viewPage(it: Item, l: { url: string; raw: string | null; thumbna
   const isPdf = mime === "application/pdf";
   const firstLine = (pasteText || "").split("\n").map((x) => x.trim()).find(Boolean) || "";
   const desc = it.kind === "paste" ? firstLine.slice(0, 200) || "Empty paste" : it.alt || `${fmtSize(it.size)} · ${mime}`;
-  let og = `<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${esc(l.url)}"><meta property="og:site_name" content="drop · shiftbloom studio"><meta name="theme-color" content="#FF2E52">`;
+  let og = `<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${esc(l.url)}"><meta property="og:site_name" content="drop · shiftbloom studio"><meta name="twitter:title" content="${esc(title)}"><meta name="theme-color" content="#FF2E52">`;
+  if (!(isVid && !it.nsfw)) og += `<meta property="og:type" content="website">`;
   if (isImg && !it.nsfw) og += `<meta property="og:image" content="${esc(l.raw)}">${it.width && it.height ? `<meta property="og:image:width" content="${it.width}"><meta property="og:image:height" content="${it.height}">` : ""}<meta property="og:image:type" content="${esc(mime)}"><meta property="og:image:alt" content="${esc(it.alt || title)}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${esc(l.raw)}">`;
   if (isVid && !it.nsfw) og += `<meta property="og:type" content="video.other"><meta property="og:video" content="${esc(l.raw)}"><meta property="og:video:type" content="${esc(mime)}"><meta property="og:video:secure_url" content="${esc(l.raw)}">${it.width && it.height ? `<meta property="og:video:width" content="${it.width}"><meta property="og:video:height" content="${it.height}">` : ""}<meta name="twitter:card" content="player">`;
 
@@ -368,7 +373,7 @@ ${topbar(`<a class="btn ghost sm" href="/">New upload</a>`)}
 <div class="titlebar"><div><span class="label red">${it.kind === "paste" ? "paste" : isImg ? "image" : isVid ? "video" : isAud ? "audio" : "file"}</span><h1 style="margin-top:8px">${esc(title)}</h1></div>
 <div class="row" style="display:flex;gap:10px"><button class="btn" id="cplink" type="button" data-u="${esc(l.url)}">Copy link</button><a class="btn ghost" href="${esc(l.raw)}">${it.kind === "paste" ? "Raw" : "Original"}</a><a class="btn ghost" href="/${esc(it.id)}/dl">Download</a></div></div>
 ${body}
-<div class="meta"><span class="label">${esc(it.id)}</span><span class="label">${it.kind === "paste" ? "paste" : fmtSize(it.size)}</span><span class="label">${fmtTime(it.created_at)}</span>${it.expires_at ? `<span class="label red">expires ${fmtTime(it.expires_at)}</span>` : ""}</div>
+<div class="meta"><span class="label">${esc(it.id)}</span><span class="label">${it.kind === "paste" ? "paste" : fmtSize(it.size)}</span><span class="label">${fmtTime(it.created_at)}</span>${it.expires_at ? `<span class="label red">expires ${fmtTime(it.expires_at)}</span>` : ""}${UI.abuseEmail ? `<a class="label" style="margin-left:auto" href="mailto:${esc(UI.abuseEmail)}?subject=${encodeURIComponent(`Report: drop item ${it.id}`)}&amp;body=${encodeURIComponent(`${l.url}\n\nWhat is wrong with this file?\n`)}">Report this file</a>` : ""}</div>
 ${it.alt ? `<p class="alt">${esc(it.alt)}</p>` : ""}
 </main>
 ${footer()}
@@ -383,6 +388,27 @@ export function notFoundPage() {
 <div class="nf"><div><span class="label">404</span><h1 style="margin-top:12px;font-size:clamp(32px,4.6vw,52px)">This link is gone<em>.</em></h1><p>It may have expired, or there’s a typo in it.</p><a class="btn" href="/">Back to drop</a></div></div>
 ${footer()}
 </div></body></html>`;
+}
+
+const simplePage = (title: string, label: string, h1: string, p: string, action: string) => `${head(title)}
+.nf{min-height:66vh;display:grid;place-items:center;text-align:center}
+.nf p{color:var(--ink60);margin:14px 0 28px;font-size:17px;max-width:32em}
+.nf form{display:inline}
+</style></head><body><div class="wrap">${topbar()}
+<div class="nf"><div><span class="label">${label}</span><h1 style="margin-top:12px;font-size:clamp(32px,4.6vw,52px);word-break:break-word">${h1}</h1><p>${p}</p>${action}</div></div>
+${footer()}
+</div></body></html>`;
+
+/** Shown instead of a file that an automatic check put on hold. */
+export function heldPage() {
+  return simplePage("On hold · drop.", "on hold", "This file is on hold<em>.</em>", "An automatic check flagged it, so it can\u2019t be opened right now.", `<a class="btn" href="/">Back to drop</a>`);
+}
+
+/** Deletion links ask first, so a link preview or crawler that opens one deletes nothing. */
+export function deletePage(name: string, done: boolean) {
+  return done
+    ? simplePage("Deleted · drop.", "deleted", `${esc(name)} is gone<em>.</em>`, "Its link doesn\u2019t work anymore.", `<a class="btn" href="/">Back to drop</a>`)
+    : simplePage("Delete? · drop.", "delete", `Delete ${esc(name)}?`, "Its link stops working right away.", `<form method="post"><button class="btn" type="submit">Delete</button></form>`);
 }
 
 /** 1200×630 card, rendered once into /og.png (Browser Rendering screenshot). */
@@ -422,4 +448,92 @@ export function llmsTxt(origin: string) {
 - Source and self-hosting guide: ${SOURCE_URL}
 - Studio: https://shiftbloom.studio
 `;
+}
+
+// ---------- imprint and privacy policy (English and German) ----------
+/** Operator details come from the LEGAL config (see README); nothing personal is hardcoded here. */
+export type LegalInfo = { name: string; business?: string; street: string; city: string; country: { en: string; de: string }; email: string; phone?: string; vatId?: string; authority: string };
+type LegalKind = "privacy" | "datenschutz" | "imprint" | "impressum";
+const LEGAL_UPDATED = { en: "Last updated 25 November 2026", de: "Stand: 25. November 2026" };
+
+export function legalPage(kind: LegalKind, l: LegalInfo, o: { malwareLookup: boolean; abuseEmail: string | null }) {
+  const de = kind === "datenschutz" || kind === "impressum";
+  const lang = de ? "de" : "en";
+  const isPrivacy = kind === "privacy" || kind === "datenschutz";
+  const title = { privacy: "Privacy policy", datenschutz: "Datenschutzerklärung", imprint: "Imprint", impressum: "Impressum" }[kind];
+  const other = { privacy: "/datenschutz", datenschutz: "/privacy", imprint: "/impressum", impressum: "/imprint" }[kind];
+  const mail = `<a href="mailto:${esc(l.email)}">${esc(l.email)}</a>`;
+  const address = `<address>${esc(l.name)}<br>${l.business ? `${esc(l.business)}<br>` : ""}${esc(l.street)}<br>${esc(l.city)}<br>${esc(l.country[lang])}</address>`;
+  const body = isPrivacy ? (de ? privacyDe(address, mail, l, o) : privacyEn(address, mail, l, o)) : imprint(de, address, mail, l);
+  return `${head(`${title} · drop.`, "", false, lang)}
+.legal{max-width:44em;padding:clamp(28px,5vw,56px) 0 0}
+.legal h1{font-size:clamp(32px,4.6vw,48px)}
+.legal h2{font-size:22px;margin:36px 0 10px}
+.legal p,.legal address{margin:0 0 14px;font-style:normal}
+.legal .meta{display:flex;gap:16px;flex-wrap:wrap;margin:14px 0 28px;font-size:14px;color:var(--ink60)}
+</style></head><body><div class="wrap">${topbar()}
+<main class="legal"><span class="label">${de ? "drop. Rechtliches" : "drop. legal"}</span><h1 style="margin-top:12px">${title}</h1>
+<div class="meta">${isPrivacy ? `<span>${LEGAL_UPDATED[lang]}</span>` : ""}<a href="${other}" hreflang="${de ? "en" : "de"}">${de ? "English" : "Deutsch"}</a></div>
+${body}
+</main>
+${footer(lang)}
+</div></body></html>`;
+}
+
+function imprint(de: boolean, address: string, mail: string, l: LegalInfo) {
+  const phone = l.phone ? `<br>${de ? "Telefon" : "Phone"}: <a href="tel:${esc(l.phone.replace(/[^\d+]/g, ""))}">${esc(l.phone)}</a>` : "";
+  const vat = l.vatId ? `<p>${de ? "Umsatzsteuer-Identifikationsnummer gemäß § 27a UStG" : "VAT ID pursuant to § 27a UStG"}: ${esc(l.vatId)}</p>` : "";
+  return de
+    ? `<p>Angaben gemäß § 5 DDG:</p>${address}<p>E-Mail: ${mail}${phone}</p>${vat}
+<h2>Verbraucherstreitbeilegung</h2><p>Wir sind nicht bereit oder verpflichtet, an Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teilzunehmen.</p>
+<h2>Inhalte von Nutzern</h2><p>Hochladen kann auf drop nur, wer den Token des Betreibers hat. Wenn dir trotzdem eine Datei auffällt, die gegen das Recht verstößt, schreib uns an ${mail}. Wir prüfen den Hinweis und entfernen rechtswidrige Inhalte umgehend.</p>`
+    : `<p>Information pursuant to § 5 DDG:</p>${address}<p>Email: ${mail}${phone}</p>${vat}
+<h2>Consumer dispute resolution</h2><p>We are not willing or obliged to take part in dispute resolution proceedings before a consumer arbitration board.</p>
+<h2>Content uploaded by users</h2><p>Only the holder of the operator's token can upload to drop. If you still come across a file that breaks the law, email us at ${mail}. We look into every report and remove unlawful content without delay.</p>`;
+}
+
+function privacyEn(address: string, mail: string, l: LegalInfo, o: { malwareLookup: boolean; abuseEmail: string | null }) {
+  return `<p>drop has no accounts for visitors and sets no cookies. There is no tracking or advertising, no analysis of visitors or their behavior, and no automated decision-making about you. This policy covers the personal data that is processed nonetheless when you open drop or a link to a file on it, above all your IP address, and the files themselves.</p>
+<h2>Controller</h2>${address}<p>Email: ${mail}</p>
+<h2>Hosting</h2>
+<p>Cloudflare, Inc., 101 Townsend St., San Francisco, CA 94107, USA, runs drop on our behalf: the pages, the files and the program behind them (a Cloudflare Worker). To do so, Cloudflare processes your IP address, the address of the page you request, the time, and details your browser sends, such as its user agent and the page you came from. You don't have to provide this data, but without it nothing can be shown to you.</p>
+<p>Requests that our Worker handles are also logged, including the IP address, the approximate location Cloudflare derives from it, and the address requested. We use these logs only to fix errors and to prevent abuse, and they are deleted after at most 7 days.</p>
+<p>To prevent abuse, the Worker counts failed sign-in attempts and requests for links that don't exist, per IP address over one minute, and refuses requests above a limit. The count is held only in the memory of Cloudflare's rate limiter.</p>
+<p>Fonts and the code highlighter are fetched by our Worker and delivered from drop itself, so your browser doesn't contact Fontshare, jsDelivr or cdnjs.</p>
+<p>The legal basis is our legitimate interest in running drop securely and reliably (Art. 6(1)(f) GDPR). Cloudflare processes the data as our processor under a data processing agreement (Art. 28 GDPR). Cloudflare, Inc. is certified under the EU-U.S. Data Privacy Framework, for which the European Commission has adopted an adequacy decision (Art. 45 GDPR); the agreement also contains the EU standard contractual clauses. More in <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare's privacy policy</a>.</p>
+<h2>Files, texts and short links</h2>
+<p>Only we upload to drop, with a token that isn't public. Anyone who has the link to a file, text or short link can open it. For each one we store the content in Cloudflare R2 and these details in Cloudflare D1 and Workers KV: file name, type, size, upload time, expiry time, a deletion code, a checksum (SHA-256) and the number of times it was opened. The view count is a plain number; it doesn't record who opened the link.</p>
+<p>Before a photo is stored, drop removes location data (GPS) from JPEG and PNG files. For images, Cloudflare Workers AI writes a short description, used as alt text, and checks whether the image might be sensitive; Cloudflare's Images service makes a small preview. Both run at Cloudflare as our processor, and the results are stored with the file. Every upload is also checked automatically for programs and harmful content; files that fail the check are held back and can't be opened.${o.malwareLookup ? ` For this check we send the file's checksum, never the file itself, to MalwareBazaar, a database of known malware run by abuse.ch (Bern University of Applied Sciences, Switzerland, a country with an EU adequacy decision).` : ""}</p>
+<p>A file is deleted when its expiry time is reached (checked every hour) or when we delete it, together with its details and preview. If a file shows you or concerns you and you want it removed, email us${o.abuseEmail ? ` or use "Report this file" on its page` : ""}. The legal basis for storing and showing files is our legitimate interest in sharing them by link (Art. 6(1)(f) GDPR).</p>
+<h2>Your browser</h2>
+<p>If you have the operator's token and enter it on the start page, your browser keeps it in its local storage under the name "drop_token", so you don't have to enter it again. It isn't a cookie, is only sent to drop with your own requests, and is removed with "Forget token". Visitors without a token store nothing. Storing it is strictly necessary for the function you asked for (§ 25(2) no. 2 TDDDG).</p>
+<h2>Email</h2>
+<p>If you email us, we use your address and message only to reply (Art. 6(1)(f) GDPR) and delete them once the matter is settled, unless the law requires us to keep them.</p>
+<h2>Your rights</h2>
+<p>You have the right of access to your personal data (Art. 15 GDPR), to rectification (Art. 16), to erasure (Art. 17), to restriction of processing (Art. 18) and to data portability (Art. 20). To exercise them, email us. You can also lodge a complaint with a data protection supervisory authority (Art. 77 GDPR), for example the one where you live or the one responsible for us: ${esc(l.authority)}.</p>
+<h2>Right to object</h2>
+<p><strong>You may object at any time, on grounds relating to your particular situation, to the processing of your personal data based on Art. 6(1)(f) GDPR (Art. 21 GDPR).</strong></p>`;
+}
+
+function privacyDe(address: string, mail: string, l: LegalInfo, o: { malwareLookup: boolean; abuseEmail: string | null }) {
+  return `<p>drop hat keine Benutzerkonten für Besucher und setzt keine Cookies. Es verwendet keine Tracking- oder Werbedienste, wertet weder Besucher noch ihr Verhalten aus und trifft keine automatisierten Entscheidungen über dich. Diese Erklärung beschreibt, welche personenbezogenen Daten trotzdem verarbeitet werden, wenn du drop oder einen Link zu einer Datei darauf öffnest, vor allem deine IP-Adresse, und was mit den Dateien selbst geschieht.</p>
+<h2>Verantwortlicher</h2>${address}<p>E-Mail: ${mail}</p>
+<h2>Hosting</h2>
+<p>Cloudflare, Inc., 101 Townsend St., San Francisco, CA 94107, USA, betreibt drop in unserem Auftrag: die Seiten, die Dateien und das Programm dahinter (einen Cloudflare Worker). Dazu verarbeitet Cloudflare deine IP-Adresse, die Adresse der aufgerufenen Seite, den Zeitpunkt und Angaben, die dein Browser mitsendet, etwa den User-Agent und die Seite, von der du kommst. Du musst diese Daten nicht bereitstellen, ohne sie kann dir aber nichts angezeigt werden.</p>
+<p>Anfragen, die unser Worker bearbeitet, werden zusätzlich protokolliert, samt IP-Adresse, dem ungefähren Standort, den Cloudflare daraus ableitet, und der aufgerufenen Adresse. Wir nutzen diese Protokolle nur, um Fehler zu beheben und Missbrauch zu verhindern; sie werden nach spätestens 7 Tagen gelöscht.</p>
+<p>Um Missbrauch zu verhindern, zählt der Worker fehlgeschlagene Anmeldeversuche und Aufrufe von Links, die es nicht gibt, je IP-Adresse über eine Minute und weist Anfragen oberhalb einer Grenze ab. Die Zählung liegt nur im Arbeitsspeicher von Cloudflares Rate-Limiter.</p>
+<p>Schriften und die Code-Hervorhebung lädt unser Worker selbst und liefert sie von drop aus, dein Browser verbindet sich also nicht mit Fontshare, jsDelivr oder cdnjs.</p>
+<p>Rechtsgrundlage ist unser berechtigtes Interesse an einem sicheren und zuverlässigen Betrieb von drop (Art. 6 Abs. 1 lit. f DSGVO). Cloudflare verarbeitet die Daten als unser Auftragsverarbeiter auf Grundlage eines Auftragsverarbeitungsvertrags (Art. 28 DSGVO). Cloudflare, Inc. ist nach dem EU-U.S. Data Privacy Framework zertifiziert, für das ein Angemessenheitsbeschluss der Europäischen Kommission besteht (Art. 45 DSGVO); der Vertrag enthält zusätzlich die EU-Standardvertragsklauseln. Mehr dazu in der <a href="https://www.cloudflare.com/de-de/privacypolicy/">Datenschutzerklärung von Cloudflare</a>.</p>
+<h2>Dateien, Texte und Kurzlinks</h2>
+<p>Hochladen können auf drop nur wir, mit einem Token, der nicht öffentlich ist. Wer den Link zu einer Datei, einem Text oder einem Kurzlink hat, kann ihn öffnen. Zu jedem Eintrag speichern wir den Inhalt in Cloudflare R2 und diese Angaben in Cloudflare D1 und Workers KV: Dateiname, Typ, Größe, Zeitpunkt des Hochladens, Ablaufzeitpunkt, einen Löschcode, eine Prüfsumme (SHA-256) und wie oft er aufgerufen wurde. Die Aufrufzahl ist eine bloße Zahl; wer den Link geöffnet hat, wird nicht festgehalten.</p>
+<p>Bevor ein Foto gespeichert wird, entfernt drop Standortdaten (GPS) aus JPEG- und PNG-Dateien. Für Bilder schreibt Cloudflare Workers AI eine kurze Beschreibung, die als Alternativtext dient, und prüft, ob das Bild heikel sein könnte; Cloudflares Images-Dienst erstellt eine kleine Vorschau. Beides läuft bei Cloudflare als unserem Auftragsverarbeiter, die Ergebnisse werden mit der Datei gespeichert. Außerdem wird jede Datei automatisch auf Programme und schädliche Inhalte geprüft; Dateien, die dabei auffallen, werden zurückgehalten und lassen sich nicht öffnen.${o.malwareLookup ? ` Für diese Prüfung senden wir die Prüfsumme der Datei, nie die Datei selbst, an MalwareBazaar, eine Datenbank bekannter Schadsoftware von abuse.ch (Berner Fachhochschule, Schweiz, ein Land mit Angemessenheitsbeschluss der EU).` : ""}</p>
+<p>Eine Datei wird gelöscht, wenn ihr Ablaufzeitpunkt erreicht ist (stündlich geprüft) oder wenn wir sie löschen, zusammen mit ihren Angaben und der Vorschau. Wenn eine Datei dich zeigt oder betrifft und du sie entfernt haben möchtest, schreib uns${o.abuseEmail ? `, etwa über „Report this file“ auf ihrer Seite` : ""}. Rechtsgrundlage für das Speichern und Anzeigen von Dateien ist unser berechtigtes Interesse, sie per Link zu teilen (Art. 6 Abs. 1 lit. f DSGVO).</p>
+<h2>Dein Browser</h2>
+<p>Wenn du den Token des Betreibers hast und ihn auf der Startseite eingibst, speichert dein Browser ihn in seinem lokalen Speicher unter dem Namen „drop_token“, damit du ihn nicht erneut eingeben musst. Er ist kein Cookie, wird nur mit deinen eigenen Anfragen an drop gesendet und mit „Forget token“ entfernt. Für Besucher ohne Token wird nichts gespeichert. Das Speichern ist für die von dir gewünschte Funktion unbedingt erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG).</p>
+<h2>E-Mail</h2>
+<p>Wenn du uns schreibst, nutzen wir deine Adresse und Nachricht nur, um dir zu antworten (Art. 6 Abs. 1 lit. f DSGVO), und löschen sie, sobald die Sache erledigt ist, es sei denn, das Gesetz verpflichtet uns zur Aufbewahrung.</p>
+<h2>Deine Rechte</h2>
+<p>Du hast das Recht auf Auskunft über deine personenbezogenen Daten (Art. 15 DSGVO), auf Berichtigung (Art. 16), Löschung (Art. 17), Einschränkung der Verarbeitung (Art. 18) und Datenübertragbarkeit (Art. 20). Schreib uns dazu eine E-Mail. Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren (Art. 77 DSGVO), etwa bei der an deinem Wohnort oder bei der für uns zuständigen: ${esc(l.authority)}.</p>
+<h2>Widerspruchsrecht</h2>
+<p><strong>Du kannst der Verarbeitung deiner personenbezogenen Daten auf Grundlage von Art. 6 Abs. 1 lit. f DSGVO jederzeit aus Gründen widersprechen, die sich aus deiner besonderen Situation ergeben (Art. 21 DSGVO).</strong></p>`;
 }

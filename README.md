@@ -126,9 +126,18 @@ curl -H "Authorization: Bearer $DROP_TOKEN" -d url=https://example.com https://d
 ## Security model
 
 - A single shared API token protects uploads. Treat `.sxcu` files like passwords. Rotate the token with `wrangler secret put API_TOKEN`.
-- HTML, JS and SVG uploads are served with `Content-Security-Policy: sandbox`, and HTML/JS are served as `text/plain`, so uploads never run script on your origin.
+- Failed token attempts and requests for ids that don't exist are rate limited per IP (`AUTH_RL`, `MISS_RL` in `wrangler.jsonc`).
+- drop looks at the first bytes of every upload instead of trusting the file name or the client's content type. Programs, scripts, installers, disk images and Office files with macros are refused, also when they are renamed.
+- Only passive types (common images, audio, video, PDF and plain text) are shown inline. Everything else, including HTML and SVG, is served as `application/octet-stream` with `Content-Disposition: attachment`. Raw files also get `Content-Security-Policy: sandbox`, so nothing uploaded runs script on your origin.
+- Location data (GPS) is removed from JPEG and PNG uploads before they are stored. The image itself isn't re-encoded.
+- A queue job checks every upload in the background on Cloudflare: it hashes the file, looks inside ZIP archives for programs and macros, refuses encrypted archives, and, if you set `MB_AUTH_KEY`, looks the hash up in [MalwareBazaar](https://bazaar.abuse.ch/). Files that fail are put on hold (HTTP 451) instead of being deleted. Release one with `POST /api/items/<id>?release`.
+- If your zone has Cloudflare's malicious uploads detection and the "Add malicious uploads detection header" managed transform, drop refuses uploads the scanner flags and holds the ones it couldn't scan.
+- Deletion links ask before they delete, so link previews and crawlers can't remove files by opening them.
 - Delete tokens and the API token are compared in constant time.
-- Rate limiting, WAF and bot rules belong in your Cloudflare zone, not in this code.
+
+### Legal pages
+
+Set `LEGAL` (JSON with `name`, optional `business`, `street`, `city`, `country.en`, `country.de`, `email`, optional `phone` and `vatId`, `authority`) to publish an imprint and a privacy policy in English and German at `/imprint`, `/impressum`, `/privacy` and `/datenschutz`. Set `ABUSE_EMAIL` to show "Report this file" on item pages. The privacy policy describes what this code does; check it against your own setup before you publish it.
 
 Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 
