@@ -66,7 +66,7 @@ npx wrangler secret put API_TOKEN           # use a long random string
 npm run deploy
 ```
 
-Without a custom domain the worker answers on `drop.<your-subdomain>.workers.dev`. To run without AI or thumbnails, remove the `ai`/`images` bindings. Everything else keeps working.
+The config turns the `workers.dev` address off, because it bypasses the zone's WAF and rate limiting rules. Without a custom domain, set `"workers_dev": true` and the worker answers on `drop.<your-subdomain>.workers.dev`. To run without AI or thumbnails, remove the `ai`/`images` bindings. Everything else keeps working.
 
 ### Deploy from GitHub Actions
 

@@ -10,7 +10,10 @@
 
   // Serve on your own (sub)domain. The zone must be on the same Cloudflare account.
   // "routes": [{ "pattern": "drop.example.com", "custom_domain": true }],
-  // "workers_dev": false,
+  // No workers.dev or preview URLs: they bypass the zone's WAF and rate limiting rules.
+  // Without a custom domain, set "workers_dev": true instead.
+  "workers_dev": false,
+  "preview_urls": false,
 
   "vars": {
     "MAX_MULTIPART_MB": "95",
