@@ -15,7 +15,7 @@ It runs at [drop.shiftbloom.studio](https://drop.shiftbloom.studio) and is made 
 - The web UI takes drag and drop or Ctrl+V, shows upload progress, and lists recent items with a short undo window on delete.
 - Fonts and highlight.js are proxied through the Worker, so visitors never talk to third-party CDNs. The homepage may be indexed. Uploads, pastes, raw files and short links send `X-Robots-Tag: noindex`.
 
-Uploading and every `/api/*` route need the API token. Viewing an item is public for anyone who has its link.
+Uploading and every `/api/*` route need an API token: the `API_TOKEN` secret or a named token (see [API tokens](#api-tokens)). Viewing an item is public for anyone who has its link.
 
 ## Architecture
 
@@ -40,7 +40,7 @@ Cron (hourly) → delete expired items from R2, KV and D1
 | `JOBS` | Queue | `drop-jobs` | thumbnail + AI jobs |
 | `AI` | Workers AI | – | optional, `AI_MODEL` overrides `@cf/moondream/moondream3.1-9B-A2B` |
 | `IMAGES` | Images | – | optional, thumbnails |
-| `API_TOKEN` | secret | – | upload/API auth |
+| `API_TOKEN` | secret | – | master token for uploads and the API |
 | `MAX_MULTIPART_MB` / `MAX_STREAM_MB` | vars | `95` / `500` | upload limits |
 
 ## Self-hosting
@@ -123,9 +123,27 @@ cat log.txt | curl -H "Authorization: Bearer $DROP_TOKEN" --data-binary @- "http
 curl -H "Authorization: Bearer $DROP_TOKEN" -d url=https://example.com https://drop.example.com/api/shorten
 ```
 
+## API tokens
+
+Besides the `API_TOKEN` secret, drop accepts named tokens. Each one has a label, an optional expiry date and can be revoked on its own, so a lost laptop or an old ShareX setup doesn't mean rotating the one token everything else uses.
+
+Named tokens start with `drop_` and live in the `api_tokens` table (migration `0004_api_tokens.sql`). Only the SHA-256 hash of a token is stored, never the token itself. A token stops working the moment its `expires_at` (unix seconds) has passed or `revoked_at` is set. `last_used_at` is updated at most once a minute.
+
+drop has no screen of its own for issuing them. [field](https://github.com/shiftbloom-studio/field) creates, lists and revokes them through its D1 binding to drop's database. Without field, insert a row yourself:
+
+```sh
+TOKEN="drop_$(openssl rand -hex 24)"
+HASH=$(printf %s "$TOKEN" | sha256sum | cut -d' ' -f1)
+npx wrangler d1 execute drop-db --remote --command \
+  "INSERT INTO api_tokens (id, label, prefix, hash, created_at, expires_at) VALUES (lower(hex(randomblob(8))), 'laptop', substr('$TOKEN',1,12), '$HASH', unixepoch(), unixepoch() + 90*86400)"
+echo "$TOKEN"
+```
+
+A `.sxcu` file downloaded from `/api/sharex` carries the token it was requested with, so it stops working together with that token.
+
 ## Security model
 
-- A single shared API token protects uploads. Treat `.sxcu` files like passwords. Rotate the token with `wrangler secret put API_TOKEN`.
+- Uploads are protected by the `API_TOKEN` secret and by named tokens. Treat `.sxcu` files like passwords. Rotate the master token with `wrangler secret put API_TOKEN`; revoke a named token instead of rotating the master token when only one device or person should lose access.
 - Failed token attempts and requests for ids that don't exist are rate limited per IP (`AUTH_RL`, `MISS_RL` in `wrangler.jsonc`).
 - drop looks at the first bytes of every upload instead of trusting the file name or the client's content type. Programs, scripts, installers, disk images and Office files with macros are refused, also when they are renamed.
 - Only passive types (common images, audio, video, PDF and plain text) are shown inline. Everything else, including HTML and SVG, is served as `application/octet-stream` with `Content-Disposition: attachment`. Raw files also get `Content-Security-Policy: sandbox`, so nothing uploaded runs script on your origin.
@@ -133,7 +151,7 @@ curl -H "Authorization: Bearer $DROP_TOKEN" -d url=https://example.com https://d
 - A queue job checks every upload in the background on Cloudflare: it hashes the file, looks inside ZIP archives for programs and macros, refuses encrypted archives, and, if you set `MB_AUTH_KEY`, looks the hash up in [MalwareBazaar](https://bazaar.abuse.ch/). Files that fail are put on hold (HTTP 451) instead of being deleted. Release one with `POST /api/items/<id>?release`.
 - If your zone has Cloudflare's malicious uploads detection and the "Add malicious uploads detection header" managed transform, drop refuses uploads the scanner flags and holds the ones it couldn't scan.
 - Deletion links ask before they delete, so link previews and crawlers can't remove files by opening them.
-- Delete tokens and the API token are compared in constant time.
+- Delete tokens and the master token are compared in constant time. Named tokens are stored only as SHA-256 hashes.
 
 ### Legal pages
 
