@@ -2,7 +2,7 @@
 
 **A tiny, self-hostable file host, pastebin and URL shortener on Cloudflare Workers.** ShareX-compatible, with expiring links, thumbnails and AI alt text.
 
-Runs at [drop.shiftbloom.studio](https://drop.shiftbloom.studio). Made by [shiftbloom studio](https://shiftbloom.studio). MIT licensed.
+Runs at [drop.shiftbloom.studio](https://drop.shiftbloom.studio). Made by [shiftbloom studio](https://shiftbloom.studio). Licensed under AGPL-3.0-or-later.
 
 - **Uploads**: images, video and any file, stored in R2. Each upload gets a view page, a raw link, a download link, range requests for video seeking, and OpenGraph/Discord embeds.
 - **Pastes**: syntax highlighting and a raw view.
@@ -146,4 +146,8 @@ Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and
 
 ## License
 
-[MIT](LICENSE) © shiftbloom studio and contributors
+Copyright © 2026 shiftbloom studio and contributors.
+
+drop is free software: you can redistribute it and/or modify it under the terms of the [GNU Affero General Public License](LICENSE) as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+If you run a modified version for others over a network, AGPL section 13 requires you to offer those users your source code. The footer's *source* link exists for this. Point `SOURCE_URL` in `src/html.ts` at your fork.

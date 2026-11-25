@@ -100,7 +100,10 @@ const head = (title: string, extra = "") => `<!doctype html><html lang="de"><hea
 
 const topbar = (right = "") => `<header class="top"><a class="brand" href="/" aria-label="drop — shiftbloom studio">${bloom({ size: 28, solid: true })}<span class="word">drop<i>.</i></span></a>${right}</header>`;
 
-const footer = (host: string) => `<footer class="foot"><span class="label">${esc(host)} · files · pastes · links</span><a class="label" href="https://shiftbloom.studio" style="background:none">shiftbloom studio<span style="color:var(--bloom)">.</span> · hamburg</a></footer>`;
+/** AGPL §13: users interacting over a network must be offered the source. Forks: point this at your repo. */
+export const SOURCE_URL = "https://github.com/shiftbloom-studio/drop";
+
+const footer = (host: string) => `<footer class="foot"><span class="label">${esc(host)} · files · pastes · links · <a class="label" href="${SOURCE_URL}" style="background:none">source (agpl-3.0)</a></span><a class="label" href="https://shiftbloom.studio" style="background:none">shiftbloom studio<span style="color:var(--bloom)">.</span> · hamburg</a></footer>`;
 
 // ---------- landing ----------
 export function landingPage(host: string) {

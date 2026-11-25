@@ -27,4 +27,4 @@ Use short, imperative subjects ("Add paste expiry header"), with a body when the
 
 Use the issue templates. For security problems, follow [SECURITY.md](SECURITY.md) instead of opening a public issue.
 
-By contributing, you agree that your contributions are licensed under the MIT License.
+By contributing, you agree that your contributions are licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later).
