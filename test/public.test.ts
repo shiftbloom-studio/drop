@@ -29,6 +29,7 @@ describe("public upload rules", () => {
     expect(publicTypeAllowed("application/zip")).toBe(false);
     expect(publicTypeAllowed("application/octet-stream")).toBe(false);
     expect(publicTypeAllowed("image/svg+xml")).toBe(false);
+    expect(publicTypeAllowed("image/x-icon")).toBe(false);
   });
   it("caps uploads per day and keys the counter by day", async () => {
     const lim = publicLimits({ PUBLIC_DAILY_UPLOADS: "2", PUBLIC_DAILY_MB: "1" });

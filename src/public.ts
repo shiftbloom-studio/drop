@@ -59,8 +59,15 @@ export function publicExpiry(raw: string | null | undefined, now = Math.floor(Da
   return now + (raw && raw in PUBLIC_EXPIRY ? PUBLIC_EXPIRY[raw] : PUBLIC_MAX_SECONDS);
 }
 
-/** Without a token, drop takes only what a browser can show passively: images, video, audio, PDF, plain text. */
-export const publicTypeAllowed = (mime: string) => INLINE_TYPES.has(mime.toLowerCase().split(";")[0].trim());
+/**
+ * Without a token, drop takes only what a browser can show passively: images, video, audio, PDF, plain text.
+ * Icons are left out: they can wrap a PNG, but the sensitive content check only runs on the image types it reads.
+ */
+const PUBLIC_EXCLUDED = new Set(["image/x-icon"]);
+export const publicTypeAllowed = (mime: string) => {
+  const type = mime.toLowerCase().split(";")[0].trim();
+  return INLINE_TYPES.has(type) && !PUBLIC_EXCLUDED.has(type);
+};
 
 /** UTC day number, the window of the daily cap. */
 export const utcDay = (now = Date.now()) => Math.floor(now / 86400000);
