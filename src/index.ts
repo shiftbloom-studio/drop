@@ -3,7 +3,7 @@
  * Storage: R2 (blobs + thumbnails), D1 (metadata, source of truth), KV (hot lookup cache for short ids).
  * Background: Queue consumer builds thumbnails (Images binding) and alt text + NSFW flag (Workers AI).
  */
-import { landingPage, viewPage, notFoundPage } from "./html";
+import { landingPage, viewPage, notFoundPage, handleAsset } from "./ui.js";
 
 export interface Env {
   FILES: R2Bucket;
@@ -321,7 +321,9 @@ async function serveThumb(req: Request, env: Env, it: Item) {
   return notFound();
 }
 
-const notFound = () => new Response(notFoundPage(), { status: 404, headers: { "content-type": "text/html; charset=utf-8" } });
+const PAGE_CSP = "default-src 'none'; img-src 'self' data: blob:; media-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self'; object-src 'self'; base-uri 'none'; form-action 'self'";
+const htmlHeaders = (cache: string) => ({ "content-type": "text/html; charset=utf-8", "cache-control": cache, "content-security-policy": PAGE_CSP, "x-content-type-options": "nosniff", "referrer-policy": "strict-origin-when-cross-origin" });
+const notFound = () => new Response(notFoundPage(), { status: 404, headers: htmlHeaders("no-store") });
 
 async function serveView(req: Request, env: Env, ctx: ExecutionContext, it: Item) {
   ctx.waitUntil(env.DB.prepare("UPDATE items SET views = views + 1 WHERE id = ?").bind(it.id).run());
@@ -336,7 +338,7 @@ async function serveView(req: Request, env: Env, ctx: ExecutionContext, it: Item
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "public, max-age=60",
-      "content-security-policy": "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; frame-src 'self'; object-src 'self'",
+      "content-security-policy": PAGE_CSP,
       "x-content-type-options": "nosniff",
       "referrer-policy": "strict-origin-when-cross-origin",
     },
@@ -418,8 +420,12 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const m = req.method;
 
   if (m === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
-  if (path === "/" && (m === "GET" || m === "HEAD")) return new Response(landingPage(url.host), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" } });
-  if (path === "/favicon.ico" || path === "/robots.txt") return new Response(path === "/robots.txt" ? "User-agent: *\nDisallow: /\n" : null, { status: path === "/robots.txt" ? 200 : 204 });
+  if (path === "/" && (m === "GET" || m === "HEAD")) return new Response(landingPage(url.host), { headers: htmlHeaders("public, max-age=300") });
+  if (path === "/robots.txt") return new Response("User-agent: *\nDisallow: /\n", { headers: { "content-type": "text/plain" } });
+  if (m === "GET" && (path.startsWith("/assets/") || path.startsWith("/favicon"))) {
+    const a = await handleAsset(req, ctx);
+    if (a) return a;
+  }
   if (path === "/health") return json({ ok: true });
 
   if (path.startsWith("/api/")) {

@@ -65,6 +65,12 @@ cat log.txt | curl -H "Authorization: Bearer $DROP_TOKEN" --data-binary @- "http
 curl -H "Authorization: Bearer $DROP_TOKEN" -d url=https://example.com https://drop.shiftbloom.studio/api/shorten
 ```
 
+## Design
+
+The UI follows the shiftbloom studio brand book v2: paper and ink with Bloom Red (`#FF2E52`) as the only accent, the Bloom mark drawn as SVG from the construction spec (4 rings + seed, gradients only inside the mark), Clash Display / General Sans / JetBrains Mono, and the Bloom Ease (`cubic-bezier(.22,1.1,.36,1)`) for motion. Fonts and highlight.js are proxied and cached through `/assets/*`, so visitors never hit third-party CDNs.
+
+`src/ui.ts` (pages + assets) ships as its own module `ui.js`, separate from the API code in `index.js`.
+
 ## Development
 
 ```sh
