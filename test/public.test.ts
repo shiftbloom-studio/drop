@@ -125,6 +125,8 @@ describe("public uploads on Node.js", () => {
     const done = await drop.env.DB.prepare("SELECT * FROM items WHERE id = ?").bind(j.id).first<Record<string, unknown>>();
     await drop.env.LINKS.put(`i:${j.id}`, JSON.stringify({ ...done, blocked: "checking" }));
     expect((await realFetch(j.url)).status).toBe(200);
+    // and the request doesn't write KV back (one write per second per key is all KV allows)
+    expect(((await drop.env.LINKS.get(`i:${j.id}`, { type: "json" })) as { blocked: string | null }).blocked).toBe("checking");
   });
 
   it("refuses failed checks, other actions, other types, big files and big pastes", async () => {

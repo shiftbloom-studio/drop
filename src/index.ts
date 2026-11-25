@@ -123,10 +123,12 @@ async function getItem(env: Env, id: string): Promise<Item | null> {
   let it = await env.LINKS.get<Item>(`i:${id}`, { type: "json", cacheTtl: 60 });
   // KV keeps a copy at the edge for up to a minute, so a public upload still marked "checking" there is
   // looked up in D1 again: otherwise its link would keep saying "still checking" long after the scan.
+  // Only a real miss writes KV back: the scan has already stored the new state, and rewriting the key on
+  // every request during that minute would run into KV's limit of one write per second per key.
   if (!it || it.blocked === CHECKING) {
-    const cached = it;
+    const miss = !it;
     it = await env.DB.prepare("SELECT * FROM items WHERE id = ?").bind(id).first<Item>();
-    if (it && !(cached && it.blocked === CHECKING)) await cacheItem(env, it);
+    if (it && miss) await cacheItem(env, it);
   }
   if (it && it.expires_at && it.expires_at < Date.now() / 1000) return null;
   return it;
