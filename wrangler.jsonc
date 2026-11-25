@@ -1,4 +1,4 @@
-// drop — Cloudflare Workers config.
+// drop - Cloudflare Workers config.
 // Before the first deploy, create the resources (see README → "Self-hosting") and
 // replace the two <placeholders> below with the IDs Wrangler prints.
 {
