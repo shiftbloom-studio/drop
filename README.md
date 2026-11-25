@@ -146,9 +146,13 @@ npm run deploy
 
 Set the optional vars from the table above in `wrangler.jsonc`. The config turns the `workers.dev` address off, because it bypasses the zone's WAF and rate limiting rules. Without a custom domain, set `"workers_dev": true` and the worker answers on `drop.<your-subdomain>.workers.dev`. To run without AI or thumbnails, remove the `ai`/`images` bindings. Everything else keeps working.
 
-### Deploy from GitHub Actions
+### Deploy on every push (Workers Builds)
 
-`.github/workflows/deploy.yml` deploys on manual dispatch. Add these repository secrets: `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers" plus D1/R2/Queues edit) and `CLOUDFLARE_ACCOUNT_ID`.
+Connect the repository to the Worker in the Cloudflare dashboard (Settings > Build). Workers Builds deploys every push to `main`, and no API token is stored on GitHub. To keep your resource ids out of the repository, let the build fill them in and keep the vars you set in the dashboard:
+
+- Build command: `npm ci && npm run check`, then write a deploy config with the ids filled in (for example by replacing `<your-d1-database-id>` and `<your-kv-namespace-id>` from build variables) as `wrangler.deploy.jsonc`
+- Deploy command: `npx wrangler d1 migrations apply drop-db --remote -c wrangler.deploy.jsonc && npx wrangler deploy -c wrangler.deploy.jsonc --keep-vars`
+- Build variables: your ids and `NODE_VERSION=26`
 
 ## Local development
 
