@@ -4,6 +4,7 @@
  * Storage: R2 (blobs + thumbnails), D1 (metadata, source of truth), KV (hot lookup cache for short ids).
  * Background: Queue consumer builds thumbnails (Images binding) and alt text + NSFW flag (Workers AI).
  */
+import { accessLog } from "./accesslog";
 import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, checkingPage, deletePage, legalPage, configureUi, requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "./ui.js";
 import { CLAIM_WINDOW, KEEP_REQUESTS, MAX_PENDING, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile, type RequestRow } from "./requests";
 import { imageEnd, gifInfo, gifFrames, encodePng, isAnimatedStill } from "./frames";
@@ -33,6 +34,7 @@ export interface Env extends BrandEnv, PublicEnv, MandateEnv {
   ABUSE_EMAIL?: string;
   /** Operator details for the imprint and privacy policy, as JSON. Legal pages are hidden when unset. */
   LEGAL?: string;
+  POSTHOG_LOGS?: string;
   /** Token requests at /request: on when both Turnstile keys are set. */
   TURNSTILE_SITE_KEY?: string;
   TURNSTILE_SECRET?: string;
@@ -634,7 +636,7 @@ async function scanFile(env: Env, id: string) {
   Object.assign(it, { sha256, blocked });
   await cacheItem(env, it);
   if (blocked === CHECKING) await analyze(env, id);
-  else if (blocked) console.warn("file on hold", id, blocked);
+  else if (blocked) console.warn("file on hold", id, blocked.split(":")[0]);
   else if (IMAGE_TYPES.test(it.mime || "")) await analyze(env, id);
 }
 
@@ -724,7 +726,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (LEGAL_PATHS[path] && (m === "GET" || m === "HEAD")) {
     const legal = parseLegal(env.LEGAL);
     if (!legal) return notFound();
-    return new Response(legalPage(LEGAL_PATHS[path], legal, { malwareLookup: !!env.MB_AUTH_KEY, abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env) }), { headers: htmlHeaders("public, max-age=3600") });
+    return new Response(legalPage(LEGAL_PATHS[path], legal, { malwareLookup: !!env.MB_AUTH_KEY, abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env), logs: env.POSTHOG_LOGS }), { headers: htmlHeaders("public, max-age=3600") });
   }
 
   if (env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET && (path === "/request" || path.startsWith("/request/"))) {
@@ -821,27 +823,35 @@ function corsHeaders() {
   return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "access-control-allow-headers": "authorization, content-type, x-expires, x-filename, x-api-key, mandate-pop", "access-control-max-age": "86400" };
 }
 
+async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  try {
+    configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env), brand: brandFrom(env) });
+    const res = await route(req, env, ctx);
+    const path = new URL(req.url).pathname;
+    if (INDEXABLE.has(path) || path.startsWith("/assets/")) return res;
+    // everything user-generated (views, raw files, thumbs, short links, API, 404) stays out of search engines
+    const r = new Response(res.body, res);
+    r.headers.set("x-robots-tag", "noindex, nofollow, noimageindex");
+    if (path.startsWith("/api/")) {
+      for (const [k, v] of Object.entries(corsHeaders())) r.headers.set(k, v);
+      // API answers depend on the token: never store them in a shared cache
+      if (!r.headers.has("cache-control")) r.headers.set("cache-control", "private, no-store");
+      r.headers.set("vary", "authorization");
+    }
+    return r;
+  } catch (e) {
+    console.error("unhandled", String(e), (e as Error)?.stack);
+    return err(500, "internal error");
+  }
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
-    try {
-      configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env), brand: brandFrom(env) });
-      const res = await route(req, env, ctx);
-      const path = new URL(req.url).pathname;
-      if (INDEXABLE.has(path) || path.startsWith("/assets/")) return res;
-      // everything user-generated (views, raw files, thumbs, short links, API, 404) stays out of search engines
-      const r = new Response(res.body, res);
-      r.headers.set("x-robots-tag", "noindex, nofollow, noimageindex");
-      if (path.startsWith("/api/")) {
-        for (const [k, v] of Object.entries(corsHeaders())) r.headers.set(k, v);
-        // API answers depend on the token: never store them in a shared cache
-        if (!r.headers.has("cache-control")) r.headers.set("cache-control", "private, no-store");
-        r.headers.set("vary", "authorization");
-      }
-      return r;
-    } catch (e) {
-      console.error("unhandled", String(e), (e as Error)?.stack);
-      return err(500, "internal error");
-    }
+    if (!env.POSTHOG_LOGS) return handle(req, env, ctx);
+    const started = Date.now();
+    const res = await handle(req, env, ctx);
+    accessLog(req, res.status, Date.now() - started);
+    return res;
   },
   async queue(batch: MessageBatch<Job>, env: Env) {
     for (const msg of batch.messages) {
