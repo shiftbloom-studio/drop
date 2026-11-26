@@ -83,7 +83,7 @@ const head = (title: string, extra = "", index = false, lang = "en") => `<!docty
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/fonts.css">${extra}<style>${css}`;
 
 /** Set per request from the Worker's config: which optional links the pages show and who runs the instance. */
-let UI: { legal: boolean; abuseEmail: string | null; requests?: boolean; public?: boolean; brand?: Brand } = { legal: false, abuseEmail: null, requests: false, public: false };
+let UI: { legal: boolean; abuseEmail: string | null; requests?: boolean; public?: boolean; brand?: Brand; analytics?: string } = { legal: false, abuseEmail: null, requests: false, public: false };
 let BRAND: Brand = brandFrom();
 export function configureUi(c: typeof UI) { UI = c; BRAND = c.brand ?? brandFrom(); }
 
@@ -138,7 +138,7 @@ export function landingPage(host: string, lim: Limits = { multiMb: 95, maxMb: 50
   const early = `<script>try{if(localStorage.getItem('drop_token'))document.documentElement.classList.add('authed')}catch(e){}</script>`;
   const pub = lim.pub;
   const ts = pub ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>` : "";
-  return `${head(BRAND.siteTitle, `${early}${ts}${landingMeta(origin)}`, true)}
+  return `${head(BRAND.siteTitle, `${early}${ts}${landingMeta(origin)}${UI.analytics || ""}`, true)}
 html.authed .anon,html:not(.authed) .member{display:none!important}
 html:not(.want) #tokf{display:none}
 .hero{display:grid;grid-template-columns:1.5fr 1fr;align-items:center;gap:32px;padding:clamp(32px,6vw,64px) 0 clamp(24px,4vw,40px)}
@@ -404,7 +404,7 @@ ${footer()}
 }
 
 export function notFoundPage() {
-  return `${head("Not found · drop.")}
+  return `${head("Not found · drop.", UI.analytics || "")}
 .nf{min-height:66vh;display:grid;place-items:center;text-align:center}
 .nf p{color:var(--ink60);margin:14px 0 28px;font-size:17px}
 </style></head><body><div class="wrap">${topbar()}
@@ -483,7 +483,7 @@ export type LegalInfo = { name: string; business?: string; street: string; city:
 type LegalKind = "privacy" | "datenschutz" | "imprint" | "impressum" | "terms" | "nutzungsbedingungen" | "content-policy" | "inhaltsrichtlinie";
 const LEGAL_DE = new Set<LegalKind>(["datenschutz", "impressum", "nutzungsbedingungen", "inhaltsrichtlinie"]);
 /** `public`: visitors may upload without a token (12 hour items, Turnstile, per-IP limits). */
-type LegalOpts = { malwareLookup: boolean; abuseEmail: string | null; requests?: boolean; public?: boolean; logs?: string };
+type LegalOpts = { malwareLookup: boolean; abuseEmail: string | null; requests?: boolean; public?: boolean; logs?: string; analytics?: boolean };
 const LEGAL_UPDATED = { en: "Last updated 26 November 2026", de: "Stand: 26. November 2026" };
 
 // Set POSTHOG_LOGS to "eu" or "us" when the Worker's logs are exported to PostHog (see README).
@@ -497,6 +497,17 @@ const errorLogsDe = (where: LogRegion): string => `<h2>Protokolle bei PostHog</h
 <p>Eine kurze Protokollzeile je Anfrage (IP-Adresse, ungefährer Standort, die aufgerufene Seite ohne die IDs von Dateien, Texten und Links und ohne Codes, der Antwortstatus, Browsertyp und Sprache) und die Fehlermeldungen, die unser Worker schreibt (etwa welcher Schritt fehlgeschlagen ist und die technische ID der betroffenen Datei, des Texts oder Links), werden an PostHog Inc., 2261 Market St. #4008, San Francisco, CA 94114, USA, gesendet, die sie für uns auf Servern ${where.de} speichert. Sie enthalten keine Dateiinhalte. Wir nutzen sie nur, um Fehler zu beheben und Missbrauch zu verhindern, und PostHog löscht sie nach 14 Tagen. Rechtsgrundlage ist unser berechtigtes Interesse an einem sicheren und zuverlässigen Betrieb von drop (Art. 6 Abs. 1 lit. f DSGVO). PostHog verarbeitet die Daten als unser Auftragsverarbeiter auf Grundlage eines Auftragsverarbeitungsvertrags (Art. 28 DSGVO), der die EU-Standardvertragsklauseln enthält. Mehr dazu in der <a href="https://posthog.com/privacy" rel="noopener">Datenschutzerklärung von PostHog</a>.</p>
 `;
 
+// Shown when POSTHOG_KEY is set (see src/posthog.ts).
+const USAGE_EN = `<h2>Usage statistics</h2>
+<p>To see how drop is used and where it breaks, the start page, the token request form, the legal pages and the "not found" page load a script that we deliver from drop itself (posthog-js, under /_sb/) and that reports to PostHog: which of these pages was viewed and the site you came from (its domain only), clicks on buttons and links (without their text or link targets), how fast the page loaded, and errors in the page's code. Pages of uploaded files, texts and links don't load it, and addresses of files, texts and links are never sent. Our Worker also reports, without your IP address, when a file, text or short link was created or deleted (its kind, a rough size class such as "under 1 MB", the general type such as "image", and whether it came from the website, ShareX or another program), when a token was requested, errors in the Worker, and the duration and outcome of the Workers AI checks on images. File names, contents, IDs, tokens and deletion codes are never sent.</p>
+<p>The script sets no cookies and stores nothing on your device. PostHog derives a daily changing ID from your IP address and browser details on its servers, so visits on the same day can be counted together, but not across days, and you can't be identified. PostHog uses the IP address only for this and for an approximate location, and doesn't store it. There is no session recording and nothing you type is recorded. PostHog may show a short survey or a support chat on these pages; you only send something there if you choose to.</p>
+<p>PostHog Inc., 2261 Market St. #4008, San Francisco, CA 94114, USA, stores this data for us on servers in the USA and processes it as our processor under a data processing agreement (Art. 28 GDPR). PostHog is certified under the EU-U.S. Data Privacy Framework, for which the European Commission has adopted an adequacy decision (Art. 45 GDPR); the agreement also contains the EU standard contractual clauses. We delete the statistics after 12 months at the latest. The legal basis is our legitimate interest in improving drop and fixing errors (Art. 6(1)(f) GDPR). A content blocker or your browser's tracking protection may stop the script; drop works the same without it. More in <a href="https://posthog.com/privacy" rel="noopener">PostHog's privacy policy</a>.</p>
+`;
+const USAGE_DE = `<h2>Nutzungsstatistik</h2>
+<p>Damit wir sehen, wie drop genutzt wird und wo es hakt, laden die Startseite, das Formular für Token-Anfragen, die Rechtsseiten und die Seite „nicht gefunden“ ein Skript, das wir von drop selbst ausliefern (posthog-js, unter /_sb/) und das an PostHog meldet: welche dieser Seiten aufgerufen wurde und von welcher Website du kommst (nur deren Domain), Klicks auf Schaltflächen und Links (ohne deren Text oder Linkziel), wie schnell die Seite geladen hat und Fehler im Code der Seite. Seiten von hochgeladenen Dateien, Texten und Links laden es nicht, und Adressen von Dateien, Texten und Links werden nie gesendet. Unser Worker meldet außerdem, ohne deine IP-Adresse, wenn eine Datei, ein Text oder ein Kurzlink angelegt oder gelöscht wurde (die Art, eine grobe Größenklasse wie „unter 1 MB“, den allgemeinen Typ wie „Bild“ und ob er von der Website, von ShareX oder einem anderen Programm kam), wenn ein Token angefragt wurde, Fehler im Worker sowie Dauer und Ergebnis der Prüfungen von Bildern durch Workers AI. Dateinamen, Inhalte, IDs, Tokens und Löschcodes werden nie gesendet.</p>
+<p>Das Skript setzt keine Cookies und speichert nichts auf deinem Gerät. PostHog bildet auf seinen Servern aus deiner IP-Adresse und Angaben deines Browsers eine täglich wechselnde ID, sodass Besuche am selben Tag zusammen gezählt werden können, aber nicht über Tage hinweg, und du nicht erkannt werden kannst. Die IP-Adresse nutzt PostHog nur dafür und für einen ungefähren Standort und speichert sie nicht. Es gibt keine Sitzungsaufzeichnung, und was du eingibst, wird nicht erfasst. PostHog kann auf diesen Seiten eine kurze Umfrage oder einen Support-Chat zeigen; dort sendest du nur etwas, wenn du es selbst möchtest.</p>
+<p>PostHog Inc., 2261 Market St. #4008, San Francisco, CA 94114, USA, speichert diese Daten für uns auf Servern in den USA und verarbeitet sie als unser Auftragsverarbeiter auf Grundlage eines Auftragsverarbeitungsvertrags (Art. 28 DSGVO). PostHog ist nach dem EU-US Data Privacy Framework zertifiziert, für das die Europäische Kommission einen Angemessenheitsbeschluss erlassen hat (Art. 45 DSGVO); der Vertrag enthält zusätzlich die EU-Standardvertragsklauseln. Wir löschen die Statistik spätestens nach 12 Monaten. Rechtsgrundlage ist unser berechtigtes Interesse, drop zu verbessern und Fehler zu beheben (Art. 6 Abs. 1 lit. f DSGVO). Ein Inhaltsblocker oder der Tracking-Schutz deines Browsers kann das Skript aufhalten; drop funktioniert ohne es genauso. Mehr dazu in der <a href="https://posthog.com/privacy" rel="noopener">Datenschutzerklärung von PostHog</a>.</p>
+`;
 
 export function legalPage(kind: LegalKind, l: LegalInfo, o: LegalOpts) {
   const de = LEGAL_DE.has(kind);
@@ -512,7 +523,7 @@ export function legalPage(kind: LegalKind, l: LegalInfo, o: LegalOpts) {
     : isImprint ? imprint(de, address, mail, l, o)
     : kind === "terms" ? termsEn(report, l, o) : kind === "nutzungsbedingungen" ? termsDe(report, l, o)
     : kind === "content-policy" ? contentEn(report, o) : contentDe(report, o);
-  return `${head(`${title} · drop.`, "", false, lang)}
+  return `${head(`${title} · drop.`, UI.analytics || "", false, lang)}
 .legal{max-width:44em;padding:clamp(28px,5vw,56px) 0 0}
 .legal h1{font-size:clamp(32px,4.6vw,48px)}
 .legal h2{font-size:22px;margin:36px 0 10px}
@@ -547,7 +558,7 @@ function imprint(de: boolean, address: string, mail: string, l: LegalInfo, o: Le
 }
 
 function privacyEn(address: string, mail: string, l: LegalInfo, o: LegalOpts) {
-  return `<p>drop has no accounts for visitors and sets no cookies. There is no tracking or advertising, no analysis of visitors or their behavior, and no automated decision-making about you. This policy covers the personal data that is processed nonetheless when you open drop or a link to a file on it, above all your IP address, and the files themselves.</p>
+  return `<p>drop has no accounts for visitors and sets no cookies. ${o.analytics ? `There is no advertising, no profiling and no automated decision-making about you. We do count, without cookies and without knowing who you are, how drop is used, as described under "Usage statistics".` : "There is no tracking or advertising, no analysis of visitors or their behavior, and no automated decision-making about you."} This policy covers the personal data that is processed nonetheless when you open drop or a link to a file on it, above all your IP address, and the files themselves.</p>
 <h2>Controller</h2>${address}<p>Email: ${mail}</p>
 <h2>Hosting</h2>
 <p>Cloudflare, Inc., 101 Townsend St., San Francisco, CA 94107, USA, runs drop on our behalf: the pages, the files and the program behind them (a Cloudflare Worker). To do so, Cloudflare processes your IP address, the address of the page you request, the time, and details your browser sends, such as its user agent and the page you came from. You don't have to provide this data, but without it nothing can be shown to you.</p>
@@ -555,7 +566,7 @@ function privacyEn(address: string, mail: string, l: LegalInfo, o: LegalOpts) {
 <p>To prevent abuse, the Worker counts failed sign-in attempts and requests for links that don't exist, per IP address over one minute, and refuses requests above a limit. The count is held only in the memory of Cloudflare's rate limiter.</p>
 <p>Fonts and the code highlighter are fetched by our Worker and delivered from drop itself, so your browser doesn't contact Fontshare, jsDelivr or cdnjs.</p>
 <p>The legal basis is our legitimate interest in running drop securely and reliably (Art. 6(1)(f) GDPR). Cloudflare processes the data as our processor under a data processing agreement (Art. 28 GDPR). Cloudflare, Inc. is certified under the EU-U.S. Data Privacy Framework, for which the European Commission has adopted an adequacy decision (Art. 45 GDPR); the agreement also contains the EU standard contractual clauses. More in <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare's privacy policy</a>.</p>
-${logRegion(o.logs) ? errorLogsEn(logRegion(o.logs)!) : ""}<h2>Files, texts and short links</h2>
+${logRegion(o.logs) ? errorLogsEn(logRegion(o.logs)!) : ""}${o.analytics ? USAGE_EN : ""}<h2>Files, texts and short links</h2>
 <p>${o.public ? "Anyone can upload files and texts to drop without a token, as described below. Short links and larger files need a token." : o.requests ? "Only we and people we\u2019ve given a token can upload to drop." : "Only we upload to drop, with a token that isn\u2019t public."} Anyone who has the link to a file, text or short link can open it. There is no public list or search of what was uploaded, and nobody can see someone else's uploads. For each one we store the content in Cloudflare R2 and these details in Cloudflare D1 and Workers KV: file name, type, size, upload time, expiry time, a deletion code, a checksum (SHA-256) and the number of times it was opened. The view count is a plain number; it doesn't record who opened the link.</p>
 <p>Before a photo is stored, drop removes location data (GPS) from JPEG and PNG files. For images, Cloudflare Workers AI writes a short description, used as alt text, and checks whether the image might be sensitive; Cloudflare's Images service makes a small preview. Both run at Cloudflare as our processor, and the results are stored with the file. Every upload is also checked automatically for programs and harmful content; files that fail the check are held back and can't be opened.${o.malwareLookup ? ` For this check we send the file's checksum, never the file itself, to MalwareBazaar, a database of known malware run by abuse.ch (Bern University of Applied Sciences, Switzerland, a country with an EU adequacy decision).` : ""}</p>
 <p>A file is deleted when its expiry time is reached (checked every hour) or when we delete it, together with its details and preview.${o.public ? " Files and texts uploaded without a token expire after 12 hours at the latest, so they are gone within 13 hours." : ""} If a file shows you or concerns you and you want it removed, email us${o.abuseEmail ? ` or use "Report this file" on its page` : ""}. The legal basis for storing and showing files is our legitimate interest in sharing them by link (Art. 6(1)(f) GDPR).</p>
@@ -580,7 +591,7 @@ ${o.requests ? `<h2>Token requests</h2>
 }
 
 function privacyDe(address: string, mail: string, l: LegalInfo, o: LegalOpts) {
-  return `<p>drop hat keine Benutzerkonten für Besucher und setzt keine Cookies. Es verwendet keine Tracking- oder Werbedienste, wertet weder Besucher noch ihr Verhalten aus und trifft keine automatisierten Entscheidungen über dich. Diese Erklärung beschreibt, welche personenbezogenen Daten trotzdem verarbeitet werden, wenn du drop oder einen Link zu einer Datei darauf öffnest, vor allem deine IP-Adresse, und was mit den Dateien selbst geschieht.</p>
+  return `<p>drop hat keine Benutzerkonten für Besucher und setzt keine Cookies. ${o.analytics ? "Es verwendet keine Werbedienste, erstellt keine Profile und trifft keine automatisierten Entscheidungen über dich. Wie drop genutzt wird, zählen wir ohne Cookies und ohne zu wissen, wer du bist, wie unter „Nutzungsstatistik“ beschrieben." : "Es verwendet keine Tracking- oder Werbedienste, wertet weder Besucher noch ihr Verhalten aus und trifft keine automatisierten Entscheidungen über dich."} Diese Erklärung beschreibt, welche personenbezogenen Daten trotzdem verarbeitet werden, wenn du drop oder einen Link zu einer Datei darauf öffnest, vor allem deine IP-Adresse, und was mit den Dateien selbst geschieht.</p>
 <h2>Verantwortlicher</h2>${address}<p>E-Mail: ${mail}</p>
 <h2>Hosting</h2>
 <p>Cloudflare, Inc., 101 Townsend St., San Francisco, CA 94107, USA, betreibt drop in unserem Auftrag: die Seiten, die Dateien und das Programm dahinter (einen Cloudflare Worker). Dazu verarbeitet Cloudflare deine IP-Adresse, die Adresse der aufgerufenen Seite, den Zeitpunkt und Angaben, die dein Browser mitsendet, etwa den User-Agent und die Seite, von der du kommst. Du musst diese Daten nicht bereitstellen, ohne sie kann dir aber nichts angezeigt werden.</p>
@@ -588,7 +599,7 @@ function privacyDe(address: string, mail: string, l: LegalInfo, o: LegalOpts) {
 <p>Um Missbrauch zu verhindern, zählt der Worker fehlgeschlagene Anmeldeversuche und Aufrufe von Links, die es nicht gibt, je IP-Adresse über eine Minute und weist Anfragen oberhalb einer Grenze ab. Die Zählung liegt nur im Arbeitsspeicher von Cloudflares Rate-Limiter.</p>
 <p>Schriften und die Code-Hervorhebung lädt unser Worker selbst und liefert sie von drop aus, dein Browser verbindet sich also nicht mit Fontshare, jsDelivr oder cdnjs.</p>
 <p>Rechtsgrundlage ist unser berechtigtes Interesse an einem sicheren und zuverlässigen Betrieb von drop (Art. 6 Abs. 1 lit. f DSGVO). Cloudflare verarbeitet die Daten als unser Auftragsverarbeiter auf Grundlage eines Auftragsverarbeitungsvertrags (Art. 28 DSGVO). Cloudflare, Inc. ist nach dem EU-U.S. Data Privacy Framework zertifiziert, für das ein Angemessenheitsbeschluss der Europäischen Kommission besteht (Art. 45 DSGVO); der Vertrag enthält zusätzlich die EU-Standardvertragsklauseln. Mehr dazu in der <a href="https://www.cloudflare.com/de-de/privacypolicy/">Datenschutzerklärung von Cloudflare</a>.</p>
-${logRegion(o.logs) ? errorLogsDe(logRegion(o.logs)!) : ""}<h2>Dateien, Texte und Kurzlinks</h2>
+${logRegion(o.logs) ? errorLogsDe(logRegion(o.logs)!) : ""}${o.analytics ? USAGE_DE : ""}<h2>Dateien, Texte und Kurzlinks</h2>
 <p>${o.public ? "Dateien und Texte kann jeder ohne Token auf drop hochladen, wie unten beschrieben. Für Kurzlinks und größere Dateien braucht es einen Token." : o.requests ? "Hochladen können auf drop nur wir und Personen, denen wir einen Token gegeben haben." : "Hochladen können auf drop nur wir, mit einem Token, der nicht öffentlich ist."} Wer den Link zu einer Datei, einem Text oder einem Kurzlink hat, kann ihn öffnen. Eine öffentliche Liste oder Suche der Uploads gibt es nicht, und niemand sieht die Uploads anderer. Zu jedem Eintrag speichern wir den Inhalt in Cloudflare R2 und diese Angaben in Cloudflare D1 und Workers KV: Dateiname, Typ, Größe, Zeitpunkt des Hochladens, Ablaufzeitpunkt, einen Löschcode, eine Prüfsumme (SHA-256) und wie oft er aufgerufen wurde. Die Aufrufzahl ist eine bloße Zahl; wer den Link geöffnet hat, wird nicht festgehalten.</p>
 <p>Bevor ein Foto gespeichert wird, entfernt drop Standortdaten (GPS) aus JPEG- und PNG-Dateien. Für Bilder schreibt Cloudflare Workers AI eine kurze Beschreibung, die als Alternativtext dient, und prüft, ob das Bild heikel sein könnte; Cloudflares Images-Dienst erstellt eine kleine Vorschau. Beides läuft bei Cloudflare als unserem Auftragsverarbeiter, die Ergebnisse werden mit der Datei gespeichert. Außerdem wird jede Datei automatisch auf Programme und schädliche Inhalte geprüft; Dateien, die dabei auffallen, werden zurückgehalten und lassen sich nicht öffnen.${o.malwareLookup ? ` Für diese Prüfung senden wir die Prüfsumme der Datei, nie die Datei selbst, an MalwareBazaar, eine Datenbank bekannter Schadsoftware von abuse.ch (Berner Fachhochschule, Schweiz, ein Land mit Angemessenheitsbeschluss der EU).` : ""}</p>
 <p>Eine Datei wird gelöscht, wenn ihr Ablaufzeitpunkt erreicht ist (stündlich geprüft) oder wenn wir sie löschen, zusammen mit ihren Angaben und der Vorschau.${o.public ? " Dateien und Texte, die ohne Token hochgeladen wurden, laufen nach spätestens 12 Stunden ab und sind damit nach spätestens 13 Stunden gelöscht." : ""} Wenn eine Datei dich zeigt oder betrifft und du sie entfernt haben möchtest, schreib uns${o.abuseEmail ? `, etwa über „Report this file“ auf ihrer Seite` : ""}. Rechtsgrundlage für das Speichern und Anzeigen von Dateien ist unser berechtigtes Interesse, sie per Link zu teilen (Art. 6 Abs. 1 lit. f DSGVO).</p>
@@ -748,7 +759,7 @@ const codeBox = (v: string) => `<div class="code"><code>${esc(v)}</code><button 
 
 /** Public form to ask for an API token. Protected by Turnstile (and, at the edge, a managed challenge). */
 export function requestPage(siteKey: string, o: { error?: string; name?: string; reason?: string } = {}) {
-  return `${head("Ask for a token · drop.", `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>`)}${REQ_CSS}</style></head><body><div class="wrap">${topbar()}
+  return `${head("Ask for a token · drop.", `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>${UI.analytics || ""}`)}${REQ_CSS}</style></head><body><div class="wrap">${topbar()}
 <section class="req">
   <div><span class="label">token request</span><h1 style="margin-top:14px">Ask for a token<em>.</em></h1>
   <p class="lead">Tell us who you are and what you’d like to share. If it’s a yes, you pick up the token through a private link that you get on the next page.</p></div>
