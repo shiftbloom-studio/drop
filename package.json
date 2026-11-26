@@ -1,6 +1,6 @@
 {
   "name": "drop",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "ShareX-compatible file host, pastebin and URL shortener for Cloudflare Workers or Node.js",
   "scripts": {
     "dev": "wrangler dev",

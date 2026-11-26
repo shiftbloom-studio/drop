@@ -1,10 +1,12 @@
 # drop.
 
+Private file sharing on Cloudflare. Upload, get a link, it expires. Malware and content checks built in.
+
+**Live:** [drop.shiftbloom.studio](https://drop.shiftbloom.studio) · **License:** AGPL-3.0-or-later
+
 drop is where shiftbloom studio's screenshots go before they get sent anywhere. It's one Cloudflare Worker, or one Node.js process if you'd rather run it yourself. Files land in R2 (or a folder on disk) and you get back a five-character link on your own domain. Text pastes and short URLs use the same kind of link, and ShareX can upload to it directly.
 
-It runs at [drop.shiftbloom.studio](https://drop.shiftbloom.studio) and is made by [shiftbloom studio](https://shiftbloom.studio). The code is licensed under AGPL-3.0-or-later.
-
-## What it does
+## Features
 
 - Every upload gets a page, a raw link and a download link. Videos support seeking, and links unfurl in Discord and Slack.
 - Pastes get syntax highlighting and a raw view.
@@ -54,6 +56,13 @@ The same code also runs on Node.js. `src/node/` provides each binding with a loc
 | `IMAGES` | Images | – | optional, thumbnails |
 | `API_TOKEN` | secret | – | master token for uploads and the API |
 | `MAX_MULTIPART_MB` / `MAX_STREAM_MB` | vars | `95` / `500` | upload limits |
+
+## Tech stack
+
+- TypeScript, bundled with esbuild into two modules (`index.js` for the API, `ui.js` for the pages)
+- Cloudflare Workers with R2, D1, KV, Queues, Images, Workers AI, rate limiting and a Cron Trigger
+- Node.js 26 for builds and tests, and as a second runtime (built-in `node:sqlite`, also as a Docker image)
+- Vitest for tests. `npm run check` runs the typecheck, the tests and both builds.
 
 ## Self-hosting
 
@@ -154,7 +163,7 @@ Connect the repository to the Worker in the Cloudflare dashboard (Settings > Bui
 - Deploy command: `npx wrangler d1 migrations apply drop-db --remote -c wrangler.deploy.jsonc && npx wrangler deploy -c wrangler.deploy.jsonc --keep-vars`
 - Build variables: your ids and `NODE_VERSION=26`
 
-## Local development
+## Development
 
 ```sh
 cp .dev.vars.example .dev.vars              # set API_TOKEN
@@ -268,8 +277,6 @@ Set `LEGAL` (JSON with `name`, optional `business`, `street`, `city`, `country.e
 
 The same setting also publishes terms of use at `/terms` and `/nutzungsbedingungen` and a content policy at `/content-policy` and `/inhaltsrichtlinie`. They are written for an operator in Germany: drop as a hosting service under the Digital Services Act (Art. 6), notices under Art. 16 DSA, and `ABUSE_EMAIL` (or the `LEGAL` email) as the point of contact under Art. 11 and 12 DSA. The upload box and the footer link to them. They aren't legal advice, so have them checked for your own instance.
 
-Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
-
 ## Design
 
 The UI follows the shiftbloom studio brand book: white paper and ink, Bloom Red `#FF2E52` as the only accent, the Bloom mark drawn as SVG from its construction spec, the shiftbloom studio wordmark, mono labels in small caps and a few sprinkles in the margins. Type is set in Clash Display, General Sans and JetBrains Mono. Motion uses the Bloom Ease `cubic-bezier(.22,1.1,.36,1)`. When you fork, you are welcome to restyle `src/html.ts`. The shiftbloom studio wordmark only appears when `BRAND` is set to `shiftbloom`, which is how drop.shiftbloom.studio runs. Set the `OPERATOR_*` settings for your own name instead.
@@ -282,7 +289,11 @@ Expect a few cents a month for personal use. R2 storage costs $0.015/GB-month wi
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Please don't report vulnerabilities in public issues. Use GitHub's private vulnerability reporting on this repository or email [safety@shiftbloom.studio](mailto:safety@shiftbloom.studio). [SECURITY.md](SECURITY.md) has the details.
 
 ## License
 
@@ -291,3 +302,7 @@ Copyright © 2026 shiftbloom studio and contributors.
 drop is free software: you can redistribute it and/or modify it under the terms of the [GNU Affero General Public License](LICENSE) as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
 If you run a modified version for others over a network, AGPL section 13 requires you to offer those users your source code. The footer's *source* link exists for this. Set `SOURCE_URL` to your fork.
+
+---
+
+drop is part of [shiftbloom studio](https://shiftbloom.studio), an open studio from Hamburg. All of our apps are open source at [github.com/shiftbloom-studio](https://github.com/shiftbloom-studio).
