@@ -66,6 +66,8 @@ describe("proxy", () => {
     expect(res!.headers.get("set-cookie")).toBeNull();
     await phProxy(req("/_sb/i/v1/e", { method: "POST", body: "{}", headers: { authorization: `Bearer ${KEY}` } }), env);
     expect(new Headers(calls[1].init.headers).get("authorization")).toBe(`Bearer ${KEY}`);
+    await phProxy(req("/_sb/api/projects/", { headers: { authorization: "Bearer phx_personal_api_key" } }), env);
+    expect(new Headers(calls[2].init.headers).get("authorization")).toBeNull();
   });
 });
 

@@ -21,7 +21,8 @@ export const phKey = (env: PostHogEnv): string | null => {
   return /^phc_[A-Za-z0-9_-]{10,}$/.test(k) ? k : null;
 };
 export function phHost(env: PostHogEnv): string {
-  const h = (env.POSTHOG_HOST || DEFAULT_HOST).trim().replace(/\/+$/, "");
+  let h = (env.POSTHOG_HOST || DEFAULT_HOST).trim();
+  while (h.endsWith("/")) h = h.slice(0, -1);
   return /^https:\/\/[a-z0-9.-]+$/i.test(h) ? h : DEFAULT_HOST;
 }
 /** PostHog Cloud serves the SDK from a separate host (us.i.posthog.com -> us-assets.i.posthog.com). */
@@ -59,7 +60,7 @@ export async function phProxy(req: Request, env: PostHogEnv, init?: { app: strin
   }
   // capture v1 sends the project token as a bearer token; anything else (such as an app's API token) is dropped
   const auth = req.headers.get("authorization");
-  if (auth && /^Bearer ph[csx]_/.test(auth)) headers.set("authorization", auth);
+  if (auth && /^Bearer phc_/.test(auth)) headers.set("authorization", auth);
   // cookieless mode hashes the visitor's IP and user agent on PostHog's side, so it needs the real address
   const ip = req.headers.get("cf-connecting-ip");
   if (ip) headers.set("x-forwarded-for", ip);
