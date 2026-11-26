@@ -48,5 +48,7 @@
   "ai": { "binding": "AI" },
   "images": { "binding": "IMAGES" },
   "triggers": { "crons": ["17 * * * *"] }
+  // Optional: agents with a stem mandate (README, "Agents with a mandate"). Needs stem on the same account.
+  // "services": [{ "binding": "MANDATES", "service": "stem", "entrypoint": "MandateGateway" }]
   // Secret (not in this file): API_TOKEN → `npx wrangler secret put API_TOKEN`
 }

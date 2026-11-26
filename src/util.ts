@@ -94,7 +94,14 @@ export const robotsTxt = (origin: string) =>
   ].join("\n");
 
 /** Who a request acts as: the master token (API_TOKEN) or one named token. */
-export type Principal = { token: string; owner: string; master: boolean };
+export type Principal = {
+  token: string;
+  owner: string;
+  master: boolean;
+  /** Set for agents with a stem mandate: asks stem whether the mandate covers this one call (see mandate.ts). */
+  mandate?: boolean;
+  check?: (call: { action: "upload" | "list" | "delete"; path?: string; bytes?: number }) => Promise<Response | null>;
+};
 export const MASTER_OWNER = "master";
 
 /**

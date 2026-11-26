@@ -83,6 +83,7 @@ Settings that both share (vars on Cloudflare, environment variables on Node.js):
 | `MB_AUTH_KEY` | optional MalwareBazaar lookups |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | optional [token requests](#token-requests) and [public uploads](#public-uploads) |
 | `PUBLIC_UPLOADS` | `on` lets visitors upload without a token, see [Public uploads](#public-uploads) |
+| `MANDATE_ISSUER` | optional, the origin of a [stem](https://github.com/shiftbloom-studio/stem) that checks [mandates](#agents-with-a-mandate) over HTTP. On Cloudflare, bind stem's `MandateGateway` as `MANDATES` instead. |
 
 ### Run with Node.js or Docker
 
@@ -233,6 +234,35 @@ echo "$TOKEN"
 ```
 
 A `.sxcu` file downloaded from `/api/sharex` carries the token it was requested with, so it stops working together with that token.
+
+### Agents with a mandate
+
+An agent doesn't need a token at all. With [stem](https://github.com/shiftbloom-studio/stem), the person signs a mandate for it with their passkey: exactly which of upload, list and delete it may do, for which file names, up to what size and for how long. The agent can hand narrower copies to sub-agents without asking anyone, and the person can stop all of them at once on their stem account page. How mandates work is in stem's [docs/mandates.md](https://github.com/shiftbloom-studio/stem/blob/main/docs/mandates.md).
+
+drop sends every request that carries a mandate to stem with its action, the file name it touches and its size, and goes ahead only when stem says the mandate covers it:
+
+| Request | Action | Name stem checks against the mandate's prefix |
+| --- | --- | --- |
+| `PUT`/`POST /api/upload?filename=…` with the raw file | `upload` | the file name as drop stores it (`/` becomes `_`) |
+| `GET /api/list?prefix=…` | `list` | the `prefix` parameter. Only names starting with it are listed. |
+| `GET`/`DELETE /api/items/<id>` | `list` / `delete` | the item's name |
+
+drop asks stem before it reads any of the body, so uploads with a mandate send the raw file, not multipart form data. Refused mandates count toward the same per-IP limit as wrong tokens. Everything else (pastes, short links, `/api/sharex`, releasing a held file) needs a token. Items uploaded with a mandate belong to its root mandate: the agent and all its sub-agents see the same history and nothing else. File names can't contain `/`, so use name prefixes such as `screens-2026-11-` where you would use folders.
+
+To turn it on, bind stem on the same Cloudflare account:
+
+```jsonc
+"services": [{ "binding": "MANDATES", "service": "stem", "entrypoint": "MandateGateway" }]
+```
+
+and add drop to stem's `MANDATE_APPS`. On Node.js, or on another account, set `MANDATE_ISSUER` to stem's origin instead. Requests then go like this (with stem's `tools/mandate-agent.mjs`):
+
+```sh
+node tools/mandate-agent.mjs request --stem https://stem.example.com --app https://drop.example.com \
+  --actions upload,list,delete --prefix screens- --max-bytes 50000000 --ttl 86400 --depth 1 --out agent.json
+node tools/mandate-agent.mjs call --from agent.json --method PUT \
+  --url "https://drop.example.com/api/upload?filename=screens-2026-11-a.png" --file a.png
+```
 
 ### Token requests
 
