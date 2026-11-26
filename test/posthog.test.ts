@@ -111,14 +111,14 @@ describe("init.js", () => {
         $current_url: "https://drop.test/aB3dE?x=1#y",
         $pathname: "/aB3dE",
         $referrer: "https://other.example/some/path?q=secret",
-        $elements_chain: 'a:attr__href="https://drop.test/aB3dE"nth-child="1"',
+        $elements_chain: 'a.copy:attr__href="https://drop.test/aB3dE"attr__aria-label="Delete x.png"attr__id="cp"nth-child="1"',
         $set: { email: "x" },
       },
     });
     expect(ev.properties.$current_url).toBe("https://drop.test/[private]");
     expect(ev.properties.$pathname).toBe("/[private]");
     expect(ev.properties.$referrer).toBe("https://other.example");
-    expect(ev.properties.$elements_chain).toBe('a:attr__href="[private]"nth-child="1"');
+    expect(ev.properties.$elements_chain).toBe('a.copy:attr__id="cp"nth-child="1"');
     expect(ev.properties.$set).toBeUndefined();
     expect(ev.properties.app).toBe("drop");
     const kept = cfg.before_send({ event: "$pageview", properties: { $current_url: "https://drop.test/privacy?utm=1" } });
@@ -131,7 +131,7 @@ describe("init.js", () => {
       event: "$autocapture",
       properties: {
         $elements_chain: 'a.res:attr__href="https://drop.test/d/aB3dE/c0de"href="https://drop.test/d/aB3dE/c0de"nth-child="1"',
-        $elements: [{ tag_name: "a", attr__href: "https://drop.test/aB3dE" }],
+        $elements: [{ tag_name: "a", attr__href: "https://drop.test/aB3dE", attr__download: "holiday.jpg", attr__id: "copy", href: "https://drop.test/aB3dE" }],
         $external_click_url: "https://other.example/x?token=abc",
         $heatmap_data: { "https://drop.test/?t=secret#h": [{ x: 1 }] },
         $web_vitals_LCP_event: { $current_url: "https://drop.test/aB3dE" },
@@ -139,8 +139,10 @@ describe("init.js", () => {
       },
     });
     const p = ev.properties;
-    expect(p.$elements_chain).toBe('a.res:attr__href="[private]"href="[private]"nth-child="1"');
-    expect(p.$elements[0].attr__href).toBe("[private]");
+    expect(p.$elements_chain).toBe('a.res:href="[private]"nth-child="1"');
+    expect(p.$elements[0].attr__href).toBeUndefined();
+    expect(p.$elements[0]).toMatchObject({ attr__id: "copy", href: "[private]" });
+    expect(p.$elements[0].attr__download).toBeUndefined();
     expect(p.$external_click_url).toBe("https://other.example");
     expect(Object.keys(p.$heatmap_data)).toEqual(["https://drop.test/"]);
     expect(p.$web_vitals_LCP_event.$current_url).toBe("https://drop.test/[private]");

@@ -116,10 +116,11 @@ function initScript(key: string, host: string, o: { app: string; keep: RegExp; e
     capture_heatmaps: true,
     capture_dead_clicks: false,
     capture_performance: { web_vitals: true, network_timing: false },
-    // clicks on buttons and links only, never what is typed or shown
+    // clicks on buttons and links only, never what is typed or shown (text is masked)
     autocapture: { dom_event_allowlist: ["click"], element_allowlist: ["a", "button"], capture_copied_text: false },
     mask_all_text: true,
-    mask_all_element_attributes: true,
+    // before_send keeps only id, class and data-ph attributes, so clicks can be told apart without link targets or labels
+    mask_all_element_attributes: false,
     mask_personal_data_properties: true,
     enable_recording_console_log: false,
     disable_web_experiments: false,
@@ -131,13 +132,13 @@ function initScript(key: string, host: string, o: { app: string; keep: RegExp; e
 var KEEP=new RegExp(${JSON.stringify(o.keep.source)});
 function path(p){p=(p||"/").replace(/\\/+$/,"")||"/";return KEEP.test(p)?p:"/[private]"}
 function clean(v){if(typeof v!=="string"||!/^https?:/.test(v))return v;try{var u=new URL(v,location.origin);if(u.origin!==location.origin)return u.origin;return u.origin+path(u.pathname)}catch(e){return null}}
-var URLS=["$current_url","$referrer","$initial_referrer","$initial_current_url","$session_entry_url","$prev_pageview_url","$session_entry_referrer"];
+var URLS=["$external_click_url","$current_url","$referrer","$initial_referrer","$initial_current_url","$session_entry_url","$prev_pageview_url","$session_entry_referrer"];
 var PATHS=["$pathname","$initial_pathname","$session_entry_pathname","$prev_pageview_pathname"];
 function mask(t){return typeof t!=="string"?t:t.replace(/"[^"]*"|'[^']*'|\\x60[^\\x60]*\\x60/g,'"[masked]"').replace(/\\b[a-z][a-z0-9+.-]*:\\/\\/\\S+/gi,"[url]").replace(/[A-Za-z0-9_-]{16,}/g,"[masked]").slice(0,500)}
+var ATTR=/^attr__(id|class|data-ph.*)$/;
 function scrub(ev){if(!ev||!ev.properties)return ev;var p=ev.properties,i,k;for(i=0;i<URLS.length;i++)if(URLS[i] in p)p[URLS[i]]=clean(p[URLS[i]]);for(i=0;i<PATHS.length;i++)if(typeof p[PATHS[i]]==="string")p[PATHS[i]]=path(p[PATHS[i]]);
-if("$external_click_url" in p)p.$external_click_url=clean(p.$external_click_url);
-if(typeof p.$elements_chain==="string")p.$elements_chain=p.$elements_chain.replace(/href="[^"]*"/g,'href="[private]"');
-if(Array.isArray(p.$elements))for(i=0;i<p.$elements.length;i++){var el=p.$elements[i];if(el){if("attr__href" in el)el.attr__href="[private]";if("href" in el)el.href="[private]"}}
+if(typeof p.$elements_chain==="string")p.$elements_chain=p.$elements_chain.replace(/attr__(?!id=|class=|data-ph)[\\w-]+="(?:[^"\\\\]|\\\\.)*"/g,"").replace(/href="(?:[^"\\\\]|\\\\.)*"/g,'href="[private]"');
+if(Array.isArray(p.$elements))for(i=0;i<p.$elements.length;i++){var el=p.$elements[i];if(el){for(k in el)if(k.indexOf("attr__")===0&&!ATTR.test(k))delete el[k];if("href" in el)el.href="[private]"}}
 if(p.$heatmap_data&&typeof p.$heatmap_data==="object"){var h={};for(k in p.$heatmap_data)h[clean(k)]=p.$heatmap_data[k];p.$heatmap_data=h}
 for(k in p)if(/^\\$web_vitals_.*_event$/.test(k)&&p[k]&&typeof p[k]==="object"&&"$current_url" in p[k])p[k].$current_url=clean(p[k].$current_url);
 if(Array.isArray(p.$exception_list))for(i=0;i<p.$exception_list.length;i++){var x=p.$exception_list[i];if(x)x.value=mask(x.value)}
@@ -151,15 +152,16 @@ window.sbTrack=function(e,p){try{posthog.capture(e,p||{})}catch(x){}};
 
 // ---------- Worker side ----------
 
-function send(env: PostHogEnv, events: Array<{ event: string; properties: Props; distinct_id?: string }>): Promise<void> {
+function send(env: PostHogEnv, events: Array<{ event: string; properties: Props }>): Promise<void> {
   const key = phKey(env);
   if (!key) return Promise.resolve();
-  const batch = events.map((e) => ({
-    event: e.event,
-    distinct_id: e.distinct_id || crypto.randomUUID(),
+  const batch = events.map(({ event, properties: { distinct_id, ...properties } }) => ({
+    event,
+    // a caller may pass a pseudonymous distinct_id (a hash, never a name or key) to tie events of one account together
+    distinct_id: typeof distinct_id === "string" && distinct_id ? distinct_id : crypto.randomUUID(),
     timestamp: new Date().toISOString(),
     // no person profile, no IP and no location for server events
-    properties: { $process_person_profile: false, $geoip_disable: true, $ip: null, $lib: "shiftbloom-worker", ...e.properties },
+    properties: { $process_person_profile: false, $geoip_disable: true, $ip: null, $lib: "shiftbloom-worker", ...properties },
   }));
   return fetch(phHost(env) + "/batch/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ api_key: key, batch }), signal: AbortSignal.timeout(5000) })
     .then((r) => { void r.body?.cancel(); })
