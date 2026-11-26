@@ -86,10 +86,11 @@ function initScript(key: string, o: { app: string; keep: RegExp; extra?: Props }
     capture_heatmaps: true,
     capture_dead_clicks: false,
     capture_performance: { web_vitals: true, network_timing: false },
-    // clicks on buttons and links only, never what is typed or shown
+    // clicks on buttons and links only, never what is typed or shown (text is masked)
     autocapture: { dom_event_allowlist: ["click"], element_allowlist: ["a", "button"], capture_copied_text: false },
     mask_all_text: true,
-    mask_all_element_attributes: true,
+    // before_send keeps only id, class and data-ph attributes, so clicks can be told apart without link targets or labels
+    mask_all_element_attributes: false,
     mask_personal_data_properties: true,
     enable_recording_console_log: false,
     disable_web_experiments: false,
@@ -101,10 +102,10 @@ function initScript(key: string, o: { app: string; keep: RegExp; extra?: Props }
 var KEEP=new RegExp(${JSON.stringify(o.keep.source)});
 function path(p){p=(p||"/").replace(/\\/+$/,"")||"/";return KEEP.test(p)?p:"/[private]"}
 function clean(v){if(typeof v!=="string"||!/^https?:/.test(v))return v;try{var u=new URL(v,location.origin);if(u.origin!==location.origin)return u.origin;return u.origin+path(u.pathname)}catch(e){return null}}
-var URLS=["$current_url","$referrer","$initial_referrer","$initial_current_url","$session_entry_url","$prev_pageview_url","$session_entry_referrer"];
+var URLS=["$external_click_url","$current_url","$referrer","$initial_referrer","$initial_current_url","$session_entry_url","$prev_pageview_url","$session_entry_referrer"];
 var PATHS=["$pathname","$initial_pathname","$session_entry_pathname","$prev_pageview_pathname"];
 function scrub(ev){if(!ev||!ev.properties)return ev;var p=ev.properties,i;for(i=0;i<URLS.length;i++)if(URLS[i] in p)p[URLS[i]]=clean(p[URLS[i]]);for(i=0;i<PATHS.length;i++)if(typeof p[PATHS[i]]==="string")p[PATHS[i]]=path(p[PATHS[i]]);
-if(typeof p.$elements_chain==="string")p.$elements_chain=p.$elements_chain.replace(/attr__href="[^"]*"/g,'attr__href="[private]"');
+if(typeof p.$elements_chain==="string")p.$elements_chain=p.$elements_chain.replace(/attr__(?!id=|class=|data-ph=)[\\w-]+="[^"]*"/g,"");
 if(p.$set)delete p.$set;if(p.$set_once)delete p.$set_once;p.app=${JSON.stringify(o.app)};return ev}
 var c=${JSON.stringify(config)};c.before_send=scrub;posthog.init(${JSON.stringify(key)},c);
 window.sbTrack=function(e,p){try{posthog.capture(e,p||{})}catch(x){}};
@@ -114,15 +115,16 @@ window.sbTrack=function(e,p){try{posthog.capture(e,p||{})}catch(x){}};
 
 // ---------- Worker side ----------
 
-function send(env: PostHogEnv, events: Array<{ event: string; properties: Props; distinct_id?: string }>): Promise<void> {
+function send(env: PostHogEnv, events: Array<{ event: string; properties: Props }>): Promise<void> {
   const key = phKey(env);
   if (!key) return Promise.resolve();
-  const batch = events.map((e) => ({
-    event: e.event,
-    distinct_id: e.distinct_id || crypto.randomUUID(),
+  const batch = events.map(({ event, properties: { distinct_id, ...properties } }) => ({
+    event,
+    // a caller may pass a pseudonymous distinct_id (a hash, never a name or key) to tie events of one account together
+    distinct_id: typeof distinct_id === "string" && distinct_id ? distinct_id : crypto.randomUUID(),
     timestamp: new Date().toISOString(),
     // no person profile, no IP and no location for server events
-    properties: { $process_person_profile: false, $geoip_disable: true, $ip: null, $lib: "shiftbloom-worker", ...e.properties },
+    properties: { $process_person_profile: false, $geoip_disable: true, $ip: null, $lib: "shiftbloom-worker", ...properties },
   }));
   return fetch(phHost(env) + "/batch/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ api_key: key, batch }) })
     .then((r) => { void r.body?.cancel(); })

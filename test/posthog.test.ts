@@ -101,14 +101,14 @@ describe("init.js", () => {
         $current_url: "https://drop.test/aB3dE?x=1#y",
         $pathname: "/aB3dE",
         $referrer: "https://other.example/some/path?q=secret",
-        $elements_chain: 'a:attr__href="https://drop.test/aB3dE"nth-child="1"',
+        $elements_chain: 'a.copy:attr__href="https://drop.test/aB3dE"attr__aria-label="Delete x.png"attr__id="cp"nth-child="1"',
         $set: { email: "x" },
       },
     });
     expect(ev.properties.$current_url).toBe("https://drop.test/[private]");
     expect(ev.properties.$pathname).toBe("/[private]");
     expect(ev.properties.$referrer).toBe("https://other.example");
-    expect(ev.properties.$elements_chain).toBe('a:attr__href="[private]"nth-child="1"');
+    expect(ev.properties.$elements_chain).toBe('a.copy:attr__id="cp"nth-child="1"');
     expect(ev.properties.$set).toBeUndefined();
     expect(ev.properties.app).toBe("drop");
     const kept = cfg.before_send({ event: "$pageview", properties: { $current_url: "https://drop.test/privacy?utm=1" } });
