@@ -35,7 +35,7 @@ const FORWARD = ["content-type", "content-encoding", "accept", "accept-encoding"
 
 /** Same-origin proxy for posthog-js: /_sb/static/* and /_sb/array/* to the assets host, the rest to the API host.
  * Returns null for any other path. Cookies and the app's own Authorization header never leave this Worker. */
-export async function phProxy(req: Request, env: PostHogEnv, init?: { app: string; keep: RegExp; extra?: Props }): Promise<Response | null> {
+export async function phProxy(req: Request, env: PostHogEnv, init?: { app: string; keep: RegExp; secret?: RegExp; extra?: Props }): Promise<Response | null> {
   const url = new URL(req.url);
   if (url.pathname !== PH_PREFIX && !url.pathname.startsWith(PH_PREFIX + "/")) return null;
   const key = phKey(env);
@@ -50,7 +50,7 @@ export async function phProxy(req: Request, env: PostHogEnv, init?: { app: strin
     if (Number(req.headers.get("content-length") || 0) > MAX_BODY) return new Response("payload too large", { status: 413 });
     const buf = await readCapped(req, MAX_BODY);
     if (!buf) return new Response("payload too large", { status: 413 });
-    body = buf;
+    body = buf.buffer as ArrayBuffer; // freshly allocated, so the buffer is exactly the body
   }
   const host = /^\/(static|array)\//.test(path) ? phAssetsHost(phHost(env)) : phHost(env);
   const headers = new Headers();
@@ -107,13 +107,15 @@ export const phScriptTag = (env: PostHogEnv) => (phKey(env) ? `<script src="${PH
 
 /** posthog-js loader plus config. URLs are reduced before sending: query and hash always go, and any path that
  * `keep` does not match (an item, a claim link) is reported as "/[private]". */
-function initScript(key: string, host: string, o: { app: string; keep: RegExp; extra?: Props }) {
+function initScript(key: string, host: string, o: { app: string; keep: RegExp; secret?: RegExp; extra?: Props }) {
   const config = {
     api_host: PH_PREFIX,
     ui_host: host.replace(/^https:\/\/(us|eu)\.i\.posthog\.com$/, "https://$1.posthog.com"),
     cookieless_mode: "always",
     person_profiles: "identified_only",
     disable_session_recording: true,
+    // a #hash may carry a secret (grow's first-run link holds the new key there): posthog-js must never read it
+    disable_capture_url_hashes: true,
     capture_pageview: true,
     capture_pageleave: true,
     capture_exceptions: true,
@@ -134,6 +136,7 @@ function initScript(key: string, host: string, o: { app: string; keep: RegExp; e
   return `!function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
 (function(){
 var KEEP=new RegExp(${JSON.stringify(o.keep.source)});
+var SECRET=new RegExp(${JSON.stringify(o.secret?.source ?? "(?!)")},"g");
 function path(p){p=(p||"/").replace(/\\/+$/,"")||"/";return KEEP.test(p)?p:"/[private]"}
 function clean(v){if(typeof v!=="string"||!/^https?:/.test(v))return v;try{var u=new URL(v,location.origin);if(u.origin!==location.origin)return u.origin;return u.origin+path(u.pathname)}catch(e){return null}}
 var URLS=["$external_click_url","$current_url","$referrer","$initial_referrer","$initial_current_url","$session_entry_url","$prev_pageview_url","$session_entry_referrer"];
@@ -143,11 +146,14 @@ var ATTR=/^attr__(id|class|data-ph.*)$/;
 function scrub(ev){if(!ev||!ev.properties)return ev;var p=ev.properties,i,k;for(i=0;i<URLS.length;i++)if(URLS[i] in p)p[URLS[i]]=clean(p[URLS[i]]);for(i=0;i<PATHS.length;i++)if(typeof p[PATHS[i]]==="string")p[PATHS[i]]=path(p[PATHS[i]]);
 if(typeof p.$elements_chain==="string")p.$elements_chain=p.$elements_chain.replace(/attr__(?!id=|class=|data-ph)[\\w-]+="(?:[^"\\\\]|\\\\.)*"/g,"").replace(/href="(?:[^"\\\\]|\\\\.)*"/g,'href="[private]"');
 if(Array.isArray(p.$elements))for(i=0;i<p.$elements.length;i++){var el=p.$elements[i];if(el){for(k in el)if(k.indexOf("attr__")===0&&!ATTR.test(k))delete el[k];if("href" in el)el.href="[private]"}}
-if(p.$heatmap_data&&typeof p.$heatmap_data==="object"){var h={};for(k in p.$heatmap_data)h[clean(k)]=p.$heatmap_data[k];p.$heatmap_data=h}
 for(k in p)if(/^\\$web_vitals_.*_event$/.test(k)&&p[k]&&typeof p[k]==="object"&&"$current_url" in p[k])p[k].$current_url=clean(p[k].$current_url);
 if(Array.isArray(p.$exception_list))for(i=0;i<p.$exception_list.length;i++){var x=p.$exception_list[i];if(x)x.value=mask(x.value)}
 if("$exception_message" in p)p.$exception_message=mask(p.$exception_message);
-if(p.$set)delete p.$set;if(p.$set_once)delete p.$set_once;p.app=${JSON.stringify(o.app)};return ev}
+if(p.$set)delete p.$set;if(p.$set_once)delete p.$set_once;p.app=${JSON.stringify(o.app)};ev.properties=deep(p,0);return ev}
+// last pass over every string and key (heatmap data is keyed by URL, web vitals and exceptions carry URLs too)
+function str(v){if(/^https?:/.test(v)){v=clean(v);if(v===null)return null}return v.replace(SECRET,"[masked]")}
+function deep(v,d){if(typeof v==="string")return str(v);if(!v||typeof v!=="object"||d>8)return v;if(Array.isArray(v)){for(var i=0;i<v.length;i++)v[i]=deep(v[i],d+1);return v}
+var out={},k,n;for(k in v){if(!Object.prototype.hasOwnProperty.call(v,k))continue;n=str(k)||k;var x=deep(v[k],d+1);out[n]=Array.isArray(out[n])&&Array.isArray(x)?out[n].concat(x):x}return out}
 var c=${JSON.stringify(config)};c.before_send=scrub;posthog.init(${JSON.stringify(key)},c);
 window.sbTrack=function(e,p){try{posthog.capture(e,p||{})}catch(x){}};
 })();

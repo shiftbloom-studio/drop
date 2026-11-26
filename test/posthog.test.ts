@@ -103,6 +103,7 @@ describe("init.js", () => {
     expect(cfg.api_host).toBe("/_sb");
     expect(cfg.cookieless_mode).toBe("always");
     expect(cfg.disable_session_recording).toBe(true);
+    expect(cfg.disable_capture_url_hashes).toBe(true);
     expect(cfg.autocapture.element_allowlist).toEqual(["a", "button"]);
   });
   it("masks item paths, query strings and link targets before sending", async () => {
@@ -149,6 +150,9 @@ describe("init.js", () => {
     expect(Object.keys(p.$heatmap_data)).toEqual(["https://drop.test/"]);
     expect(p.$web_vitals_LCP_event.$current_url).toBe("https://drop.test/[private]");
     expect(p.$exception_list[0].value).not.toContain("secret");
+    // the last pass reaches URLs anywhere, also in nested and unknown properties
+    const deep = cfg.before_send({ event: "x", properties: { custom: { list: ["https://drop.test/aB3dE?k=1"] } } });
+    expect(deep.properties.custom.list[0]).toBe("https://drop.test/[private]");
   });
 });
 
