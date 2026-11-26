@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bloom, deletePage, faviconSvg, landingPage, legalPage, notFoundPage, viewPage } from "../src/html";
 import type { Item } from "../src/index";
+import { inlineScripts } from "./inline-scripts";
 
 const item = (over: Partial<Item> = {}): Item => ({
   id: "aB3dE", kind: "file", r2_key: "f/aB3dE/x.png", name: "x.png", mime: "image/png", size: 2048, target: null, lang: null,
@@ -51,7 +52,7 @@ describe("pages", () => {
   it("ships inline scripts that parse", () => {
     const pages = [landingPage("drop.test"), viewPage(item(), links, null), viewPage(item({ kind: "paste", mime: "text/plain" }), links, "x")];
     for (const html of pages)
-      for (const [, code] of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) expect(() => new Function(code)).not.toThrow();
+      for (const code of inlineScripts(html)) expect(() => new Function(code)).not.toThrow();
   });
   it("renders view dates as <time> for local conversion and stays noindex", () => {
     const html = viewPage(item({ expires_at: 1_790_003_600 }), links, null);
