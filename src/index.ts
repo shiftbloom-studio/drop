@@ -191,6 +191,8 @@ async function handleUpload(req: Request, env: Env, ctx: ExecutionContext, p: Pr
   let it: Item;
 
   if (ct.startsWith("multipart/form-data")) {
+    // a mandate is checked before drop reads any of the body, and a multipart name is only known after reading it
+    if (p.check) return err(415, "with a mandate, send the raw file: PUT /api/upload?filename=<name>");
     const max = pub ? pub.maxBytes : Number(env.MAX_MULTIPART_MB || 95) * 1024 * 1024;
     const len = Number(req.headers.get("content-length") || 0);
     if (pub && len > max + 65536) return err(413, `without a token, files are limited to ${Math.round(max / 1048576)} MB`);
@@ -217,7 +219,6 @@ async function handleUpload(req: Request, env: Env, ctx: ExecutionContext, p: Pr
       const end = mime.startsWith("image/") ? imageEnd(mime, bytes)! : bytes.length;
       if (end < bytes.length) bytes = bytes.slice(0, end);
     }
-    if (p.check) { const no = await p.check({ action: "upload", path: name, bytes: bytes.length }); if (no) return no; }
     if (mime === "image/jpeg") bytes = stripJpegLocation(bytes).bytes;
     else if (mime === "image/png") bytes = stripPngLocation(bytes).bytes;
     const expires_at = pub ? publicExpiry(expiresRaw) : parseExpiry(expiresRaw);
@@ -741,7 +742,13 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
 
   if (path.startsWith("/api/")) {
     const viaMandate = mandatePrincipal(req, env);
-    if (viaMandate instanceof Response) return viaMandate;
+    // refused mandates count toward the same per-IP limit as wrong tokens
+    const limited = async (res: Response) => (env.AUTH_RL && !(await env.AUTH_RL.limit({ key: ip(req) })).success ? err(429, "too many attempts, wait a minute") : res);
+    if (viaMandate instanceof Response) return limited(viaMandate);
+    if (viaMandate?.check) {
+      const check = viaMandate.check;
+      viaMandate.check = async (call) => { const no = await check(call); return no && no.status !== 503 ? limited(no) : no; };
+    }
     const who = viaMandate ?? (await authenticate(req, env, ctx));
     if (!who) {
       // slow down token guessing: a handful of failed attempts per IP and minute, then 429

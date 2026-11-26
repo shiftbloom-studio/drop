@@ -31,11 +31,8 @@ describe("mandates", () => {
     return fits ? { allowed: true, mandate: jti, sub: "u1", purpose: "test", depth: a.chain.length - 1 } : { allowed: false, reason: "outside_mandate", message: "The mandate doesn't cover this request." };
   };
   const as = (jti: string) => ({ authorization: `Mandate ${chain(jti)}`, "mandate-pop": "pop.jwt.sig" });
-  const upload = (name: string, body: string, jti = "m1-good-mandate") => {
-    const f = new FormData();
-    f.append("file", new Blob([body]), name);
-    return fetch(`${drop.url}/api/upload`, { method: "POST", headers: as(jti), body: f });
-  };
+  const upload = (name: string, body: string, jti = "m1-good-mandate") =>
+    fetch(`${drop.url}/api/upload?filename=${encodeURIComponent(name)}`, { method: "PUT", headers: { ...as(jti), "content-type": "image/png" }, body });
 
   beforeAll(async () => {
     stem = createServer((req, res) => {
@@ -72,9 +69,18 @@ describe("mandates", () => {
     const r = await upload("screens-a.png", "hello");
     expect(r.status).toBe(201);
     const last = asked.at(-1)!;
-    expect(last).toMatchObject({ action: "upload", path: "screens-a.png", bytes: 5, method: "POST", pop: "pop.jwt.sig" });
-    expect(last.url).toBe(`${drop.url}/api/upload`);
+    expect(last).toMatchObject({ action: "upload", path: "screens-a.png", bytes: 5, method: "PUT", pop: "pop.jwt.sig" });
+    expect(last.url).toBe(`${drop.url}/api/upload?filename=screens-a.png`);
     expect(last.chain).toHaveLength(2);
+  });
+
+  it("checks the mandate before reading a body, so multipart uploads are refused unread", async () => {
+    const n = asked.length;
+    const f = new FormData();
+    f.append("file", new Blob(["x".repeat(1000)]), "screens-m.png");
+    const r = await fetch(`${drop.url}/api/upload`, { method: "POST", headers: as("m1-good-mandate"), body: f });
+    expect(r.status).toBe(415);
+    expect(asked.length).toBe(n);
   });
 
   it("refuses an upload outside the mandate and stores nothing", async () => {

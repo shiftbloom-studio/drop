@@ -243,11 +243,11 @@ drop sends every request that carries a mandate to stem with its action, the fil
 
 | Request | Action | Name stem checks against the mandate's prefix |
 | --- | --- | --- |
-| `POST`/`PUT /api/upload` | `upload` | the file name as drop stores it (`/` becomes `_`) |
+| `PUT`/`POST /api/upload?filename=…` with the raw file | `upload` | the file name as drop stores it (`/` becomes `_`) |
 | `GET /api/list?prefix=…` | `list` | the `prefix` parameter. Only names starting with it are listed. |
 | `GET`/`DELETE /api/items/<id>` | `list` / `delete` | the item's name |
 
-Everything else (pastes, short links, `/api/sharex`, releasing a held file) needs a token. Items uploaded with a mandate belong to its root mandate: the agent and all its sub-agents see the same history and nothing else. File names can't contain `/`, so use name prefixes such as `screens-2026-11-` where you would use folders.
+drop asks stem before it reads any of the body, so uploads with a mandate send the raw file, not multipart form data. Refused mandates count toward the same per-IP limit as wrong tokens. Everything else (pastes, short links, `/api/sharex`, releasing a held file) needs a token. Items uploaded with a mandate belong to its root mandate: the agent and all its sub-agents see the same history and nothing else. File names can't contain `/`, so use name prefixes such as `screens-2026-11-` where you would use folders.
 
 To turn it on, bind stem on the same Cloudflare account:
 
