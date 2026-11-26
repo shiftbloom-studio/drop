@@ -4,9 +4,17 @@ export const THUMB_TYPES = /^image\/(jpeg|png|gif|webp|avif|bmp|tiff)$/;
 export const EXPIRY: Record<string, number> = { "10m": 600, "1h": 3600, "1d": 86400, "7d": 604800, "30d": 2592000, "90d": 7776000, "1y": 31536000 };
 
 export function randomString(len: number, alphabet = ID_ALPHABET) {
-  const bytes = crypto.getRandomValues(new Uint8Array(len));
+  const mask = (1 << Math.ceil(Math.log2(alphabet.length))) - 1;
   let out = "";
-  for (const b of bytes) out += alphabet[b % alphabet.length];
+  // Rejection sampling: mask each byte down to the next power of two and drop values
+  // outside the alphabet, so every character is equally likely (no modulo bias).
+  while (out.length < len) {
+    for (const b of crypto.getRandomValues(new Uint8Array(len * 2))) {
+      const v = b & mask;
+      if (v < alphabet.length) out += alphabet[v];
+      if (out.length === len) break;
+    }
+  }
   return out;
 }
 

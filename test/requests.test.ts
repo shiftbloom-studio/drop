@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CLAIM_WINDOW, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile } from "../src/requests";
 import { isNamedToken, robotsTxt, sha256Hex } from "../src/util";
 import { requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "../src/html";
+import { inlineScripts } from "./inline-scripts";
 
 const form = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.append(k, v); return f; };
 
@@ -75,7 +76,7 @@ describe("request pages", () => {
   });
   it("show the claim link and the token once, with scripts that parse", () => {
     for (const h of [requestSentPage("https://drop.example/request/abc"), tokenShownPage("drop_secret", 2_000_000_000), tokenShownPage("drop_secret", null)]) {
-      for (const [, code] of h.matchAll(/<script>([\s\S]*?)<\/script>/g)) expect(() => new Function(code)).not.toThrow();
+      for (const code of inlineScripts(h)) expect(() => new Function(code)).not.toThrow();
     }
     expect(requestSentPage("https://drop.example/request/abc")).toContain("https://drop.example/request/abc");
     expect(tokenShownPage("drop_secret", null)).toContain("drop_secret");
