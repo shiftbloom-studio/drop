@@ -10,9 +10,10 @@ import { imageEnd, gifInfo, gifFrames, encodePng, isAnimatedStill } from "./fram
 import { sniff, blockReason, effectiveType, INLINE_TYPES, stripJpegLocation, stripPngLocation, inspectZip } from "./safety";
 import { brandFrom, type BrandEnv } from "./brand";
 import { CHECKING, NOT_CHECKED, limitKey, PUBLIC_ACTION, PUBLIC_ID_LENGTH, PUBLIC_OWNER, PUBLIC_PREFIX, publicEnabled, publicExpiry, publicLimits, publicTypeAllowed, publicNameMatches, PUBLIC_TYPES, PUBLIC_GIF_MAX_FRAMES, PUBLIC_GIF_MAX_PIXELS, PUBLIC_GIF_MAX_WORK, usageKey, utcDay, withinDailyCap, type PublicEnv, type PublicLimits } from "./public";
+import { mandatePrincipal, type MandateEnv } from "./mandate";
 import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName, robotsTxt, ownerFilter, canManage, MASTER_OWNER, type Principal } from "./util";
 
-export interface Env extends BrandEnv, PublicEnv {
+export interface Env extends BrandEnv, PublicEnv, MandateEnv {
   FILES: R2Bucket;
   DB: D1Database;
   LINKS: KVNamespace;
@@ -216,6 +217,7 @@ async function handleUpload(req: Request, env: Env, ctx: ExecutionContext, p: Pr
       const end = mime.startsWith("image/") ? imageEnd(mime, bytes)! : bytes.length;
       if (end < bytes.length) bytes = bytes.slice(0, end);
     }
+    if (p.check) { const no = await p.check({ action: "upload", path: name, bytes: bytes.length }); if (no) return no; }
     if (mime === "image/jpeg") bytes = stripJpegLocation(bytes).bytes;
     else if (mime === "image/png") bytes = stripPngLocation(bytes).bytes;
     const expires_at = pub ? publicExpiry(expiresRaw) : parseExpiry(expiresRaw);
@@ -232,6 +234,7 @@ async function handleUpload(req: Request, env: Env, ctx: ExecutionContext, p: Pr
     declared = ct.split(";")[0];
     const pre = blockReason(name, null);
     if (pre || scan === "1") return err(422, BLOCK_MSG[pre || "malware"](name));
+    if (p.check) { const no = await p.check({ action: "upload", path: name, bytes: len }); if (no) return no; }
     const expires_at = parseExpiry(expiresRaw);
     if (expires_at === undefined) return err(400, "invalid expires (use 10m, 1h, 1d, 7d, 30d, 90d, 1y, never or e.g. 12h)");
     // keep the first bytes while streaming to R2, so the type can be checked without buffering
@@ -332,7 +335,14 @@ async function handleList(req: Request, env: Env, p: Principal) {
   const kind = u.searchParams.get("kind");
   // every token sees only its own history; the links themselves stay public.
   // The master token can also look at uploads without a token (?scope=public), to moderate them.
-  const own = p.master && u.searchParams.get("scope") === "public" ? { sql: "owner = ?", args: [PUBLIC_OWNER] } : ownerFilter(p);
+  let own = p.master && u.searchParams.get("scope") === "public" ? { sql: "owner = ?", args: [PUBLIC_OWNER] } : ownerFilter(p);
+  // an agent with a mandate lists by name prefix (?prefix=), inside the prefix its mandate allows
+  if (p.check) {
+    const prefix = u.searchParams.get("prefix") ?? "";
+    const no = await p.check({ action: "list", path: prefix });
+    if (no) return no;
+    if (prefix) own = { sql: `${own.sql} AND substr(name, 1, length(?)) = ?`, args: [...own.args, prefix, prefix] };
+  }
   const stmt = kind
     ? env.DB.prepare(`SELECT * FROM items WHERE ${own.sql} AND kind = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(...own.args, kind, limit, offset)
     : env.DB.prepare(`SELECT * FROM items WHERE ${own.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(...own.args, limit, offset);
@@ -730,13 +740,18 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (path === "/api/public/upload" || path === "/api/public/paste") return handlePublic(req, env, ctx, url, path === "/api/public/upload" ? "upload" : "paste");
 
   if (path.startsWith("/api/")) {
-    const who = await authenticate(req, env, ctx);
+    const viaMandate = mandatePrincipal(req, env);
+    if (viaMandate instanceof Response) return viaMandate;
+    const who = viaMandate ?? (await authenticate(req, env, ctx));
     if (!who) {
       // slow down token guessing: a handful of failed attempts per IP and minute, then 429
       if (env.AUTH_RL && !(await env.AUTH_RL.limit({ key: ip(req) })).success) return err(429, "too many attempts, wait a minute");
       return err(401, "unauthorized: send Authorization: Bearer <token>");
     }
     if (path === "/api/upload" && (m === "POST" || m === "PUT")) return handleUpload(req, env, ctx, who);
+    // a mandate covers upload, list and delete: nothing else
+    if (who.check && !(path === "/api/list" && m === "GET") && !(/^\/api\/items\/[A-Za-z0-9]+$/.test(path) && (m === "GET" || m === "DELETE")))
+      return err(403, "a mandate covers upload, list and delete only");
     if (path === "/api/paste" && m === "POST") return handlePaste(req, env, who);
     if (path === "/api/shorten" && m === "POST") return handleShorten(req, env, who);
     if (path === "/api/list" && m === "GET") return handleList(req, env, who);
@@ -746,6 +761,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
       const it = await env.DB.prepare("SELECT * FROM items WHERE id = ?").bind(im[1]).first<Item>();
       // another token's item looks exactly like a missing one
       if (!it || !canManage(who, it.owner)) return err(404, "not found");
+      if (who.check) { const no = await who.check({ action: m === "DELETE" ? "delete" : "list", path: it.name ?? "" }); if (no) return no; }
       if (m === "DELETE") { await deleteItem(env, it); return json({ deleted: it.id }); }
       if (m === "GET") return json({ ...it, ...links(req, it) });
       if (m === "POST" && url.searchParams.get("reanalyze") !== null) { await env.JOBS.send({ type: "scan", id: it.id }); return json({ queued: it.id }); }
@@ -795,7 +811,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
 const INDEXABLE = new Set(["/", "/robots.txt", "/sitemap.xml", "/llms.txt", "/og.png", "/favicon.svg", "/favicon.ico"]); // legal pages carry their own noindex meta
 
 function corsHeaders() {
-  return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "access-control-allow-headers": "authorization, content-type, x-expires, x-filename, x-api-key", "access-control-max-age": "86400" };
+  return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "access-control-allow-headers": "authorization, content-type, x-expires, x-filename, x-api-key, mandate-pop", "access-control-max-age": "86400" };
 }
 
 export default {
