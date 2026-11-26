@@ -5,6 +5,7 @@
  * Background: Queue consumer builds thumbnails (Images binding) and alt text + NSFW flag (Workers AI).
  */
 import { accessLog } from "./accesslog";
+import { phAi, phCapture, phException, phProxy, phScriptTag, sizeBucket, type PostHogEnv } from "./posthog";
 import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, checkingPage, deletePage, legalPage, configureUi, requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "./ui.js";
 import { CLAIM_WINDOW, KEEP_REQUESTS, MAX_PENDING, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile, type RequestRow } from "./requests";
 import { imageEnd, gifInfo, gifFrames, encodePng, isAnimatedStill } from "./frames";
@@ -14,7 +15,7 @@ import { CHECKING, NOT_CHECKED, limitKey, PUBLIC_ACTION, PUBLIC_ID_LENGTH, PUBLI
 import { mandatePrincipal, type MandateEnv } from "./mandate";
 import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName, robotsTxt, ownerFilter, canManage, MASTER_OWNER, type Principal } from "./util";
 
-export interface Env extends BrandEnv, PublicEnv, MandateEnv {
+export interface Env extends BrandEnv, PublicEnv, MandateEnv, PostHogEnv {
   FILES: R2Bucket;
   DB: D1Database;
   LINKS: KVNamespace;
@@ -114,6 +115,27 @@ async function saveItem(env: Env, it: Item, p: Principal) {
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`
   ).bind(it.id, it.kind, it.r2_key, it.name, it.mime, it.size, it.target, it.lang, it.created_at, it.expires_at, it.delete_token, it.thumb_key, it.alt, it.nsfw, it.blocked ?? null, it.owner).run();
   await cacheItem(env, it);
+}
+
+/** Pages whose address may be reported as is; every other path (items, claim and deletion links) is masked. */
+const PH_KEEP = /^\/(request|privacy|datenschutz|imprint|impressum|terms|nutzungsbedingungen|content-policy|inhaltsrichtlinie)?$/;
+
+const typeGroup = (mime: string | null) => {
+  const m = (mime || "").toLowerCase();
+  return m.startsWith("image/") ? "image" : m.startsWith("video/") ? "video" : m.startsWith("audio/") ? "audio" : m.startsWith("text/") ? "text"
+    : /zip|tar|gzip|7z|rar/.test(m) ? "archive" : m === "application/pdf" ? "pdf" : "other";
+};
+function sourceOf(req: Request) {
+  const ua = req.headers.get("user-agent") || "";
+  if (/sharex/i.test(ua)) return "sharex";
+  const origin = req.headers.get("origin");
+  return origin && origin === new URL(req.url).origin ? "web" : "api";
+}
+const viaOf = (p: Principal) => (p.owner === PUBLIC_OWNER ? "public" : p.check ? "mandate" : p.master ? "master" : "token");
+
+/** item_created: kind, rough size, general type and where it came from. Never the name, id or content. */
+function trackItem(env: Env, ctx: ExecutionContext | undefined, req: Request, it: Item, p: Principal) {
+  phCapture(env, ctx, "item_created", { kind: it.kind, size_bucket: it.kind === "link" ? null : sizeBucket(it.size), type_group: it.kind === "file" ? typeGroup(it.mime) : it.kind, source: sourceOf(req), via: viaOf(p), expires: it.expires_at ? "set" : "never" });
 }
 
 async function cacheItem(env: Env, it: Item) {
@@ -262,10 +284,11 @@ async function handleUpload(req: Request, env: Env, ctx: ExecutionContext, p: Pr
   else if (pub) it.blocked = CHECKING;
   await saveItem(env, it, p);
   ctx.waitUntil(env.JOBS.send({ type: "scan", id }));
+  trackItem(env, ctx, req, it, p);
   return json(links(req, it), 201);
 }
 
-async function handlePaste(req: Request, env: Env, p: Principal, pub?: PublicLimits) {
+async function handlePaste(req: Request, env: Env, p: Principal, pub?: PublicLimits, ctx?: ExecutionContext) {
   const ct = req.headers.get("content-type") || "";
   let content = "", lang = "", title = "", expires: string | null = new URL(req.url).searchParams.get("expires") || req.headers.get("x-expires");
   if (ct.includes("application/json")) {
@@ -293,10 +316,11 @@ async function handlePaste(req: Request, env: Env, p: Principal, pub?: PublicLim
   Object.assign(it, { r2_key: `${pub ? PUBLIC_PREFIX : ""}p/${id}.txt`, name, mime: "text/plain; charset=utf-8", size: new TextEncoder().encode(content).length, lang: lang.replace(/[^a-z0-9+#-]/gi, "").slice(0, 20) || null });
   await env.FILES.put(it.r2_key!, content, { httpMetadata: { contentType: "text/plain; charset=utf-8" } });
   await saveItem(env, it, p);
+  trackItem(env, ctx, req, it, p);
   return json(links(req, it), 201);
 }
 
-async function handleShorten(req: Request, env: Env, p: Principal) {
+async function handleShorten(req: Request, env: Env, p: Principal, ctx?: ExecutionContext) {
   const ct = req.headers.get("content-type") || "";
   const u = new URL(req.url);
   let target = u.searchParams.get("url") || "", expires = u.searchParams.get("expires") || req.headers.get("x-expires");
@@ -314,6 +338,7 @@ async function handleShorten(req: Request, env: Env, p: Principal) {
   const it = baseItem(id, "link", expires_at);
   it.target = parsed.toString();
   await saveItem(env, it, p);
+  trackItem(env, ctx, req, it, p);
   return json(links(req, it), 201);
 }
 
@@ -430,7 +455,7 @@ const REQUEST_CSP = PAGE_CSP.replace("script-src 'self' 'unsafe-inline'", `scrip
 const reqHtml = (body: string, status = 200, csp = PAGE_CSP) =>
   new Response(body, { status, headers: { ...htmlHeaders("no-store"), "content-security-policy": csp, "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" } });
 
-async function handleTokenRequest(req: Request, env: Env, url: URL): Promise<Response> {
+async function handleTokenRequest(req: Request, env: Env, url: URL, ctx?: ExecutionContext): Promise<Response> {
   const siteKey = env.TURNSTILE_SITE_KEY!, now = Math.floor(Date.now() / 1000);
   const form404 = (error: string, v: { name?: string; reason?: string } = {}, status = 400) => reqHtml(requestPage(siteKey, { error, ...v }), status, REQUEST_CSP);
   if (env.REQ_RL && !(await env.REQ_RL.limit({ key: ip(req) })).success) return form404("Too many requests from your connection. Wait a minute, then try again.", {}, 429);
@@ -448,6 +473,7 @@ async function handleTokenRequest(req: Request, env: Env, url: URL): Promise<Res
   const code = newClaimCode();
   await env.DB.prepare("INSERT INTO token_requests (id, name, reason, claim_hash, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)")
     .bind(randomString(12), v.name, v.reason, await sha256Hex(code), now).run();
+  phCapture(env, ctx, "token_requested", {});
   return reqHtml(requestSentPage(`${url.origin}/request/${code}`));
 }
 
@@ -544,15 +570,15 @@ async function analyze(env: Env, id: string) {
     // the binding may return the payload directly or wrapped in { result }
     const pick = (r: any, k: string) => r?.[k] ?? r?.result?.[k];
     try {
-      const cap: any = await env.AI.run(model, { task: "caption", image, caption_length: "short", stream: false } as any);
+      const cap: any = await phAi(env, null, { model, properties: { task: "caption" } }, () => env.AI!.run(model, { task: "caption", image, caption_length: "short", stream: false } as any));
       const caption = pick(cap, "caption");
       if (caption) it.alt = String(caption).trim().slice(0, 500);
     } catch (e) { console.warn("caption failed", id, String(e)); }
     try {
-      const q: any = await env.AI.run(model, {
+      const q: any = await phAi(env, null, { model, properties: { task: "sensitive_check" } }, () => env.AI!.run(model, {
         task: "query", image, reasoning: false, max_tokens: 5, temperature: 0, stream: false,
         question: SENSITIVE_QUESTION,
-      } as any);
+      } as any));
       const answer = pick(q, "answer");
       if (answer) { it.nsfw = /^\s*yes/i.test(String(answer)) ? 1 : 0; checked = true; }
     } catch (e) { console.warn("nsfw check failed", id, String(e)); }
@@ -566,10 +592,10 @@ async function analyze(env: Env, id: string) {
         for (const f of gifFrames(gif)) {
           frames++;
           const png = await encodePng(f.width, f.height, f.rgb);
-          const q: any = await env.AI.run(model, {
+          const q: any = await phAi(env, null, { model, properties: { task: "sensitive_check_frame" } }, () => env.AI!.run(model, {
             task: "query", image: `data:image/png;base64,${toBase64(png.buffer as ArrayBuffer)}`, reasoning: false, max_tokens: 5, temperature: 0, stream: false,
             question: SENSITIVE_QUESTION,
-          } as any);
+          } as any));
           const answer = pick(q, "answer");
           if (!answer) { checked = false; break; }
           if (/^\s*yes/i.test(String(answer))) { it.nsfw = 1; break; }
@@ -588,6 +614,7 @@ async function analyze(env: Env, id: string) {
     it.blocked = !checked ? NOT_CHECKED : it.nsfw === 1 ? "flagged as sensitive" : null;
     await env.DB.prepare("UPDATE items SET blocked = ? WHERE id = ?").bind(it.blocked, id).run();
     if (it.blocked) console.warn("file on hold", id, it.blocked);
+    await phCapture(env, null, "item_held", { reason: it.blocked === NOT_CHECKED ? "not_checked" : "sensitive", type_group: typeGroup(it.mime) });
   }
   await cacheItem(env, it);
 }
@@ -642,13 +669,16 @@ async function scanFile(env: Env, id: string) {
 
 async function cleanup(env: Env) {
   const now = Math.floor(Date.now() / 1000);
+  let expired = 0;
   for (let round = 0; round < 10; round++) {
     const { results } = await env.DB.prepare("SELECT * FROM items WHERE expires_at IS NOT NULL AND expires_at < ? LIMIT 200").bind(now).all<Item>();
     if (!results.length) break;
     for (const it of results) await deleteItem(env, it);
+    expired += results.length;
   }
   // daily counters of public uploads are only needed for the current day
   await env.DB.prepare("DELETE FROM public_usage WHERE day < ?").bind(utcDay() - 1).run().catch(() => null); // table missing until migration 0007
+  return expired;
 }
 
 // ---------- public uploads (no token) ----------
@@ -670,7 +700,7 @@ async function handlePublic(req: Request, env: Env, ctx: ExecutionContext, url: 
   if (!(await verifyTurnstile(env.TURNSTILE_SECRET!, req.headers.get("x-turnstile") || "", req.headers.get("cf-connecting-ip"), fetch, PUBLIC_ACTION, url.hostname)))
     return err(403, "We couldn\u2019t confirm you\u2019re a person. Try again.");
   const who: Principal = { token: "", owner: PUBLIC_OWNER, master: false };
-  const res = kind === "upload" ? await handleUpload(req, env, ctx, who, lim) : await handlePaste(req, env, who, lim);
+  const res = kind === "upload" ? await handleUpload(req, env, ctx, who, lim) : await handlePaste(req, env, who, lim, ctx);
   if (res.status === 201)
     await env.DB.prepare("INSERT INTO public_usage (key, day, uploads, bytes) VALUES (?, ?, 1, ?) ON CONFLICT (key, day) DO UPDATE SET uploads = uploads + 1, bytes = bytes + excluded.bytes")
       .bind(key, day, len).run();
@@ -703,6 +733,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const m = req.method;
 
+  const ph = await phProxy(req, env, { app: "drop", keep: PH_KEEP });
+  if (ph) return ph;
   if (m === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
   if (path === "/" && (m === "GET" || m === "HEAD")) {
     const pub = publicEnabled(env) ? publicLimits(env) : null;
@@ -726,13 +758,13 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (LEGAL_PATHS[path] && (m === "GET" || m === "HEAD")) {
     const legal = parseLegal(env.LEGAL);
     if (!legal) return notFound();
-    return new Response(legalPage(LEGAL_PATHS[path], legal, { malwareLookup: !!env.MB_AUTH_KEY, abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env), logs: env.POSTHOG_LOGS }), { headers: htmlHeaders("public, max-age=3600") });
+    return new Response(legalPage(LEGAL_PATHS[path], legal, { malwareLookup: !!env.MB_AUTH_KEY, abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env), logs: env.POSTHOG_LOGS, analytics: !!phScriptTag(env) }), { headers: htmlHeaders("public, max-age=3600") });
   }
 
   if (env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET && (path === "/request" || path.startsWith("/request/"))) {
     if (path === "/request") {
       if (m === "GET" || m === "HEAD") return reqHtml(requestPage(env.TURNSTILE_SITE_KEY), 200, REQUEST_CSP);
-      if (m === "POST") return handleTokenRequest(req, env, url);
+      if (m === "POST") return handleTokenRequest(req, env, url, ctx);
     } else {
       const code = path.slice(9);
       if (m === "GET" || m === "HEAD" || m === "POST") return handleClaim(req, env, code);
@@ -761,8 +793,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     // a mandate covers upload, list and delete: nothing else
     if (who.check && !(path === "/api/list" && m === "GET") && !(/^\/api\/items\/[A-Za-z0-9]+$/.test(path) && (m === "GET" || m === "DELETE")))
       return err(403, "a mandate covers upload, list and delete only");
-    if (path === "/api/paste" && m === "POST") return handlePaste(req, env, who);
-    if (path === "/api/shorten" && m === "POST") return handleShorten(req, env, who);
+    if (path === "/api/paste" && m === "POST") return handlePaste(req, env, who, undefined, ctx);
+    if (path === "/api/shorten" && m === "POST") return handleShorten(req, env, who, ctx);
     if (path === "/api/list" && m === "GET") return handleList(req, env, who);
     if (path === "/api/sharex" && m === "GET") return sharexConfig(req, who.token, url.searchParams.get("type") || "upload");
     const im = /^\/api\/items\/([A-Za-z0-9]+)$/.exec(path);
@@ -771,7 +803,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
       // another token's item looks exactly like a missing one
       if (!it || !canManage(who, it.owner)) return err(404, "not found");
       if (who.check) { const no = await who.check({ action: m === "DELETE" ? "delete" : "list", path: it.name ?? "" }); if (no) return no; }
-      if (m === "DELETE") { await deleteItem(env, it); return json({ deleted: it.id }); }
+      if (m === "DELETE") { await deleteItem(env, it); phCapture(env, ctx, "item_deleted", { kind: it.kind, by: "api", via: viaOf(who) }); return json({ deleted: it.id }); }
       if (m === "GET") return json({ ...it, ...links(req, it) });
       if (m === "POST" && url.searchParams.get("reanalyze") !== null) { await env.JOBS.send({ type: "scan", id: it.id }); return json({ queued: it.id }); }
       if (m === "POST" && url.searchParams.get("release") !== null) {
@@ -793,6 +825,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     // GET only asks: link previews and crawlers that open a deletion URL must not delete anything
     if (m === "GET") return new Response(deletePage(it.name || it.id, false), { headers: htmlHeaders("no-store") });
     await deleteItem(env, it);
+    phCapture(env, ctx, "item_deleted", { kind: it.kind, by: "deletion_link" });
     if (m === "DELETE") return new Response(`deleted ${it.id}\n`, { headers: { "content-type": "text/plain" } });
     return new Response(deletePage(it.name || it.id, true), { headers: htmlHeaders("no-store") });
   }
@@ -825,7 +858,7 @@ function corsHeaders() {
 
 async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   try {
-    configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env), brand: brandFrom(env) });
+    configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env), brand: brandFrom(env), analytics: phScriptTag(env) });
     const res = await route(req, env, ctx);
     const path = new URL(req.url).pathname;
     if (INDEXABLE.has(path) || path.startsWith("/assets/")) return res;
@@ -841,6 +874,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     return r;
   } catch (e) {
     console.error("unhandled", String(e), (e as Error)?.stack);
+    phException(env, ctx, e, { where: "fetch" });
     return err(500, "internal error");
   }
 }
@@ -853,7 +887,7 @@ export default {
     accessLog(req, res.status, Date.now() - started);
     return res;
   },
-  async queue(batch: MessageBatch<Job>, env: Env) {
+  async queue(batch: MessageBatch<Job>, env: Env, ctx: ExecutionContext) {
     for (const msg of batch.messages) {
       try {
         if (msg.body.type === "scan") await scanFile(env, msg.body.id);
@@ -861,11 +895,12 @@ export default {
         msg.ack();
       } catch (e) {
         console.error("job failed", msg.body, String(e));
+        phException(env, ctx, e, { where: "queue", job: msg.body.type });
         msg.retry({ delaySeconds: 30 });
       }
     }
   },
   async scheduled(_c: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(cleanup(env));
+    ctx.waitUntil(cleanup(env).then((expired) => phCapture(env, null, "cleanup_ran", { expired_deleted: expired }), (e) => { console.error("cleanup failed", String(e)); return phException(env, null, e, { where: "cleanup" }); }));
   },
 } satisfies ExportedHandler<Env, Job>;

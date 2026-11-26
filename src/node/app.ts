@@ -86,7 +86,7 @@ export async function startDrop(o: DropOptions) {
     REQ_RL: new MemoryRateLimit(3, 60),
     PUB_RL: new MemoryRateLimit(6, 60),
   } as Record<string, unknown>;
-  const queue = new LocalQueue<{ type: "scan" | "analyze"; id: string }>("drop-jobs", () => (batch) => worker.queue(batch as never, env as unknown as Env), 3);
+  const queue = new LocalQueue<{ type: "scan" | "analyze"; id: string }>("drop-jobs", () => (batch) => worker.queue(batch as never, env as unknown as Env, { waitUntil() {}, passThroughOnException() {} } as never), 3);
   env.JOBS = queue;
   const typedEnv = env as unknown as Env;
 

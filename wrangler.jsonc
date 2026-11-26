@@ -51,4 +51,5 @@
   // Optional: agents with a stem mandate (README, "Agents with a mandate"). Needs stem on the same account.
   // "services": [{ "binding": "MANDATES", "service": "stem", "entrypoint": "MandateGateway" }]
   // Secret (not in this file): API_TOKEN → `npx wrangler secret put API_TOKEN`
+  // Optional secret: POSTHOG_KEY (PostHog project token) turns on usage statistics, see README. Region via the var POSTHOG_HOST.
 }
