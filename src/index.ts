@@ -4,6 +4,7 @@
  * Storage: R2 (blobs + thumbnails), D1 (metadata, source of truth), KV (hot lookup cache for short ids).
  * Background: Queue consumer builds thumbnails (Images binding) and alt text + NSFW flag (Workers AI).
  */
+import { accessLog } from "./accesslog";
 import { landingPage, viewPage, notFoundPage, handleAsset, heldPage, checkingPage, deletePage, legalPage, configureUi, requestPage, requestSentPage, requestStatusPage, tokenShownPage } from "./ui.js";
 import { CLAIM_WINDOW, KEEP_REQUESTS, MAX_PENDING, isClaimCode, newApiToken, newClaimCode, readRequestForm, requestState, verifyTurnstile, type RequestRow } from "./requests";
 import { imageEnd, gifInfo, gifFrames, encodePng, isAnimatedStill } from "./frames";
@@ -822,27 +823,35 @@ function corsHeaders() {
   return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "access-control-allow-headers": "authorization, content-type, x-expires, x-filename, x-api-key, mandate-pop", "access-control-max-age": "86400" };
 }
 
+async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  try {
+    configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env), brand: brandFrom(env) });
+    const res = await route(req, env, ctx);
+    const path = new URL(req.url).pathname;
+    if (INDEXABLE.has(path) || path.startsWith("/assets/")) return res;
+    // everything user-generated (views, raw files, thumbs, short links, API, 404) stays out of search engines
+    const r = new Response(res.body, res);
+    r.headers.set("x-robots-tag", "noindex, nofollow, noimageindex");
+    if (path.startsWith("/api/")) {
+      for (const [k, v] of Object.entries(corsHeaders())) r.headers.set(k, v);
+      // API answers depend on the token: never store them in a shared cache
+      if (!r.headers.has("cache-control")) r.headers.set("cache-control", "private, no-store");
+      r.headers.set("vary", "authorization");
+    }
+    return r;
+  } catch (e) {
+    console.error("unhandled", String(e), (e as Error)?.stack);
+    return err(500, "internal error");
+  }
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
-    try {
-      configureUi({ legal: !!parseLegal(env.LEGAL), abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env), brand: brandFrom(env) });
-      const res = await route(req, env, ctx);
-      const path = new URL(req.url).pathname;
-      if (INDEXABLE.has(path) || path.startsWith("/assets/")) return res;
-      // everything user-generated (views, raw files, thumbs, short links, API, 404) stays out of search engines
-      const r = new Response(res.body, res);
-      r.headers.set("x-robots-tag", "noindex, nofollow, noimageindex");
-      if (path.startsWith("/api/")) {
-        for (const [k, v] of Object.entries(corsHeaders())) r.headers.set(k, v);
-        // API answers depend on the token: never store them in a shared cache
-        if (!r.headers.has("cache-control")) r.headers.set("cache-control", "private, no-store");
-        r.headers.set("vary", "authorization");
-      }
-      return r;
-    } catch (e) {
-      console.error("unhandled", String(e), (e as Error)?.stack);
-      return err(500, "internal error");
-    }
+    if (!env.POSTHOG_LOGS) return handle(req, env, ctx);
+    const started = Date.now();
+    const res = await handle(req, env, ctx);
+    accessLog(req, res.status, Date.now() - started);
+    return res;
   },
   async queue(batch: MessageBatch<Job>, env: Env) {
     for (const msg of batch.messages) {

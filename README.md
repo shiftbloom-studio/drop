@@ -306,12 +306,12 @@ With `PUBLIC_UPLOADS=on` and both Turnstile keys set, visitors without a token c
 Workers Logs can be exported over OpenTelemetry without code changes. Create a logs destination under Workers & Pages > Observability > Destinations with the URL `https://eu.i.posthog.com/i/v1/logs` (or `us.i.posthog.com`) and the header `Authorization: Bearer <your PostHog project token>`, then add it to the Worker's config:
 
 ```jsonc
-"observability": { "enabled": true, "logs": { "enabled": true, "destinations": ["<your-destination-name>"] } }
+"observability": { "enabled": true, "redact_query_string": true, "logs": { "enabled": true, "invocation_logs": false, "destinations": ["<your-destination-name>"] } }
 ```
 
-Set the var `POSTHOG_LOGS` to `eu` or `us` so the privacy policy names PostHog and where it stores the logs.
+Keep `invocation_logs` off: Cloudflare's invocation logs contain the full request URL, which includes file IDs, deletion links and claim codes. With `POSTHOG_LOGS` set, drop writes its own line per request instead, with those parts masked, no query string and only the user agent, language, content type and length headers.
 
-The export includes Cloudflare's invocation logs, whose full request URLs contain item IDs, deletion and claim codes and, for API uploads, file names and short-link targets; the privacy policy says so. To keep them out, set `"invocation_logs": false` (console logs are still exported) and adjust the privacy section.
+Set the var `POSTHOG_LOGS` to `eu` or `us` so the privacy policy names PostHog and where it stores the logs.
 
 ### Legal pages
 
