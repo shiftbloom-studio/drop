@@ -901,6 +901,6 @@ export default {
     }
   },
   async scheduled(_c: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(cleanup(env).then((expired) => phCapture(env, null, "cleanup_ran", { expired_deleted: expired }), (e) => phException(env, null, e, { where: "cleanup" })));
+    ctx.waitUntil(cleanup(env).then((expired) => phCapture(env, null, "cleanup_ran", { expired_deleted: expired }), (e) => { console.error("cleanup failed", String(e)); return phException(env, null, e, { where: "cleanup" }); }));
   },
 } satisfies ExportedHandler<Env, Job>;

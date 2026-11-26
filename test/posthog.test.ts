@@ -69,6 +69,16 @@ describe("proxy", () => {
   });
 });
 
+describe("proxy limits", () => {
+  it("refuses other methods and bodies over 1 MB", async () => {
+    const calls = stubFetch();
+    expect((await phProxy(new Request("https://drop.test/_sb/e/", { method: "PUT", body: "{}" }), env))!.status).toBe(405);
+    expect((await phProxy(new Request("https://drop.test/_sb/e/", { method: "POST", body: "x".repeat(1_000_001) }), env))!.status).toBe(413);
+    expect((await phProxy(new Request("https://drop.test/_sb/e/", { method: "POST", body: "x".repeat(1_000_001), headers: { "content-length": "10" } }), env))!.status).toBe(413);
+    expect(calls).toHaveLength(0);
+  });
+});
+
 describe("init.js", () => {
   async function load(path: string) {
     const res = await phProxy(new Request("https://drop.test/_sb/init.js"), env, { app: "drop", keep: KEEP });
@@ -115,6 +125,27 @@ describe("init.js", () => {
     expect(kept.properties.$current_url).toBe("https://drop.test/privacy");
     expect(cfg.before_send({ event: "x", properties: { $referrer: "$direct" } }).properties.$referrer).toBe("$direct");
   });
+  it("masks link targets, heatmap URLs and exception messages", async () => {
+    const { cfg } = await load("/");
+    const ev = cfg.before_send({
+      event: "$autocapture",
+      properties: {
+        $elements_chain: 'a.res:attr__href="https://drop.test/d/aB3dE/c0de"href="https://drop.test/d/aB3dE/c0de"nth-child="1"',
+        $elements: [{ tag_name: "a", attr__href: "https://drop.test/aB3dE" }],
+        $external_click_url: "https://other.example/x?token=abc",
+        $heatmap_data: { "https://drop.test/?t=secret#h": [{ x: 1 }] },
+        $web_vitals_LCP_event: { $current_url: "https://drop.test/aB3dE" },
+        $exception_list: [{ type: "SyntaxError", value: 'Unexpected token, "my secret paste" is not valid JSON' }],
+      },
+    });
+    const p = ev.properties;
+    expect(p.$elements_chain).toBe('a.res:attr__href="[private]"href="[private]"nth-child="1"');
+    expect(p.$elements[0].attr__href).toBe("[private]");
+    expect(p.$external_click_url).toBe("https://other.example");
+    expect(Object.keys(p.$heatmap_data)).toEqual(["https://drop.test/"]);
+    expect(p.$web_vitals_LCP_event.$current_url).toBe("https://drop.test/[private]");
+    expect(p.$exception_list[0].value).not.toContain("secret");
+  });
 });
 
 describe("worker events", () => {
@@ -132,6 +163,13 @@ describe("worker events", () => {
     const ex = JSON.parse(String(calls[0].init.body)).batch[0];
     expect(ex.event).toBe("$exception");
     expect(ex.properties.$exception_list[0].value).toBe("token [masked] failed");
+    await phException(env, null, new SyntaxError('Unexpected token \'h\', "hello secret paste" is not valid JSON'));
+    await phException(env, null, new Error("R2 get failed for p/aB3dE9x.txt at https://x.example/a?b=c"));
+    const v1 = JSON.parse(String(calls[1].init.body)).batch[0].properties.$exception_list[0].value;
+    const v2 = JSON.parse(String(calls[2].init.body)).batch[0].properties.$exception_list[0].value;
+    expect(v1).not.toContain("secret");
+    expect(v2).not.toContain("aB3dE9x");
+    expect(v2).not.toContain("x.example");
   });
   it("reports AI calls without inputs or outputs", async () => {
     const calls = stubFetch();
