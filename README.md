@@ -301,6 +301,16 @@ With `PUBLIC_UPLOADS=on` and both Turnstile keys set, visitors without a token c
 - Deletion links ask before they delete, so link previews and crawlers can't remove files by opening them.
 - Delete tokens and the master token are compared in constant time. Named tokens are stored only as SHA-256 hashes.
 
+### Logs in PostHog
+
+Workers Logs can be exported over OpenTelemetry without code changes. Create a logs destination under Workers & Pages > Observability > Destinations with the URL `https://eu.i.posthog.com/i/v1/logs` (or `us.i.posthog.com`) and the header `Authorization: Bearer <your PostHog project token>`, then add it to the Worker's config:
+
+```jsonc
+"observability": { "enabled": true, "logs": { "enabled": true, "destinations": ["<your-destination-name>"] } }
+```
+
+Set the var `POSTHOG_LOGS` to `eu` or `us` so the privacy policy names PostHog and where it stores the logs.
+
 ### Legal pages
 
 Set `LEGAL` (JSON with `name`, optional `business`, `street`, `city`, `country.en`, `country.de`, `email`, optional `phone` and `vatId`, `authority`) to publish an imprint and a privacy policy in English and German at `/imprint`, `/impressum`, `/privacy` and `/datenschutz`. Set `ABUSE_EMAIL` to show "Report this file" on item pages. The privacy policy describes what this code does; check it against your own setup before you publish it.

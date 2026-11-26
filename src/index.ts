@@ -33,6 +33,7 @@ export interface Env extends BrandEnv, PublicEnv, MandateEnv {
   ABUSE_EMAIL?: string;
   /** Operator details for the imprint and privacy policy, as JSON. Legal pages are hidden when unset. */
   LEGAL?: string;
+  POSTHOG_LOGS?: string;
   /** Token requests at /request: on when both Turnstile keys are set. */
   TURNSTILE_SITE_KEY?: string;
   TURNSTILE_SECRET?: string;
@@ -634,7 +635,7 @@ async function scanFile(env: Env, id: string) {
   Object.assign(it, { sha256, blocked });
   await cacheItem(env, it);
   if (blocked === CHECKING) await analyze(env, id);
-  else if (blocked) console.warn("file on hold", id, blocked);
+  else if (blocked) console.warn("file on hold", id, blocked.split(":")[0]);
   else if (IMAGE_TYPES.test(it.mime || "")) await analyze(env, id);
 }
 
@@ -724,7 +725,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (LEGAL_PATHS[path] && (m === "GET" || m === "HEAD")) {
     const legal = parseLegal(env.LEGAL);
     if (!legal) return notFound();
-    return new Response(legalPage(LEGAL_PATHS[path], legal, { malwareLookup: !!env.MB_AUTH_KEY, abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env) }), { headers: htmlHeaders("public, max-age=3600") });
+    return new Response(legalPage(LEGAL_PATHS[path], legal, { malwareLookup: !!env.MB_AUTH_KEY, abuseEmail: env.ABUSE_EMAIL || null, requests: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET), public: publicEnabled(env), logs: env.POSTHOG_LOGS }), { headers: htmlHeaders("public, max-age=3600") });
   }
 
   if (env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET && (path === "/request" || path.startsWith("/request/"))) {
