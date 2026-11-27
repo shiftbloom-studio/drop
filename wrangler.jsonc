@@ -6,7 +6,7 @@
   "name": "drop",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
-  "observability": { "enabled": true },
+  "observability": { "enabled": true, "issues": { "enabled": true } },
 
   // Serve on your own (sub)domain. The zone must be on the same Cloudflare account.
   // "routes": [{ "pattern": "drop.example.com", "custom_domain": true }],
