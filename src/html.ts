@@ -1,6 +1,7 @@
 import { bloomSvg, faviconSvg } from "./bloom";
 import { brandFrom, type Brand } from "./brand";
 import type { Item } from "./index";
+import { trimTrailingSlashes } from "./util";
 
 /* drop - UI following the shiftbloom studio brand book v2.
  * Paper & ink with one loud flower: Bloom Red for actions and seeds, gradients only inside the mark.
@@ -119,7 +120,7 @@ function landingMeta(origin: string) {
     isAccessibleForFree: true,
     license: "https://www.gnu.org/licenses/agpl-3.0.html",
     offers: { "@type": "Offer", price: "0", priceCurrency: "EUR" },
-    ...(o ? { publisher: { "@type": "Organization", ...(o.url ? { "@id": `${o.url.replace(/\/+$/, "")}/#org` } : {}), name: o.name, ...(o.url ? { url: o.url } : {}) } } : {}),
+    ...(o ? { publisher: { "@type": "Organization", ...(o.url ? { "@id": `${trimTrailingSlashes(o.url)}/#org` } : {}), name: o.name, ...(o.url ? { url: o.url } : {}) } } : {}),
     sameAs: [sourceUrl()],
   };
   return `<meta name="description" content="${esc(SITE_DESC)}"><link rel="canonical" href="${esc(origin)}/">
@@ -133,7 +134,9 @@ function landingMeta(origin: string) {
 /** `pub` is set when visitors without a token may upload (see public.ts). */
 export type Limits = { multiMb: number; maxMb: number; pub?: { siteKey: string; maxMb: number; pasteKb: number } };
 
-export function landingPage(host: string, lim: Limits = { multiMb: 95, maxMb: 500 }, origin = `https://${host}`) {
+const DEFAULT_LIMITS: Limits = { multiMb: 95, maxMb: 500 };
+
+export function landingPage(host: string, lim: Limits = DEFAULT_LIMITS, origin = `https://${host}`) {
   // the token check runs before first paint, so visitors never see the tool flash
   const early = `<script>try{if(localStorage.getItem('drop_token'))document.documentElement.classList.add('authed')}catch(e){}</script>`;
   const pub = lim.pub;
