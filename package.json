@@ -10,18 +10,18 @@
     "token": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning dist/node/server.js token",
     "typecheck": "tsc -p .",
     "db:migrate": "wrangler d1 migrations apply drop-db --remote",
-    "build": "esbuild src/index.ts --bundle --format=esm --minify --target=es2022 --external:./ui.js --outfile=dist/index.js && esbuild src/ui.ts --bundle --format=esm --minify --target=es2022 --outfile=dist/ui.js",
+    "build": "esbuild src/index.ts --bundle --format=esm --minify --target=es2025 --external:./ui.js --outfile=dist/index.js && esbuild src/ui.ts --bundle --format=esm --minify --target=es2022 --outfile=dist/ui.js",
     "build:node": "esbuild src/node/server.ts --bundle --platform=node --format=esm --target=node26 --outfile=dist/node/server.js",
     "test": "vitest run",
     "check": "tsc -p . && vitest run && npm run build && npm run build:node"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261125.1",
-    "@types/node": "^26.6.10",
+    "@cloudflare/workers-types": "^5.20261127.1",
+    "@types/node": "^26.6.11",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
-    "vitest": "^5.1.1",
-    "wrangler": "^4.168.0"
+    "vitest": "^5.1.2",
+    "wrangler": "^4.169.0"
   },
   "private": true,
   "type": "module",
