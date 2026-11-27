@@ -13,7 +13,7 @@ import { sniff, blockReason, effectiveType, INLINE_TYPES, stripJpegLocation, str
 import { brandFrom, type BrandEnv } from "./brand";
 import { CHECKING, NOT_CHECKED, limitKey, PUBLIC_ACTION, PUBLIC_ID_LENGTH, PUBLIC_OWNER, PUBLIC_PREFIX, publicEnabled, publicExpiry, publicLimits, publicTypeAllowed, publicNameMatches, PUBLIC_TYPES, PUBLIC_GIF_MAX_FRAMES, PUBLIC_GIF_MAX_PIXELS, PUBLIC_GIF_MAX_WORK, usageKey, utcDay, withinDailyCap, type PublicEnv, type PublicLimits } from "./public";
 import { mandatePrincipal, type MandateEnv } from "./mandate";
-import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName, robotsTxt, ownerFilter, canManage, MASTER_OWNER, type Principal } from "./util";
+import { randomString, timingSafeEqual, parseExpiry, extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, sanitizeName, robotsTxt, trimTrailingSlashes, ownerFilter, canManage, MASTER_OWNER, type Principal } from "./util";
 
 export interface Env extends BrandEnv, PublicEnv, MandateEnv, PostHogEnv {
   FILES: R2Bucket;
@@ -135,7 +135,7 @@ const viaOf = (p: Principal) => (p.owner === PUBLIC_OWNER ? "public" : p.check ?
 
 /** item_created: kind, rough size, general type and where it came from. Never the name, id or content. */
 function trackItem(env: Env, ctx: ExecutionContext | undefined, req: Request, it: Item, p: Principal) {
-  phCapture(env, ctx, "item_created", { kind: it.kind, size_bucket: it.kind === "link" ? null : sizeBucket(it.size), type_group: it.kind === "file" ? typeGroup(it.mime) : it.kind, source: sourceOf(req), via: viaOf(p), expires: it.expires_at ? "set" : "never" });
+  void phCapture(env, ctx, "item_created", { kind: it.kind, size_bucket: it.kind === "link" ? null : sizeBucket(it.size), type_group: it.kind === "file" ? typeGroup(it.mime) : it.kind, source: sourceOf(req), via: viaOf(p), expires: it.expires_at ? "set" : "never" });
 }
 
 async function cacheItem(env: Env, it: Item) {
@@ -473,7 +473,7 @@ async function handleTokenRequest(req: Request, env: Env, url: URL, ctx?: Execut
   const code = newClaimCode();
   await env.DB.prepare("INSERT INTO token_requests (id, name, reason, claim_hash, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)")
     .bind(randomString(12), v.name, v.reason, await sha256Hex(code), now).run();
-  phCapture(env, ctx, "token_requested", {});
+  void phCapture(env, ctx, "token_requested", {});
   return reqHtml(requestSentPage(`${url.origin}/request/${code}`));
 }
 
@@ -730,7 +730,7 @@ async function authenticate(req: Request, env: Env, ctx: ExecutionContext): Prom
 
 async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(req.url);
-  const path = url.pathname.replace(/\/+$/, "") || "/";
+  const path = trimTrailingSlashes(url.pathname) || "/";
   const m = req.method;
 
   const ph = await phProxy(req, env, { app: "drop", keep: PH_KEEP });
@@ -803,7 +803,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
       // another token's item looks exactly like a missing one
       if (!it || !canManage(who, it.owner)) return err(404, "not found");
       if (who.check) { const no = await who.check({ action: m === "DELETE" ? "delete" : "list", path: it.name ?? "" }); if (no) return no; }
-      if (m === "DELETE") { await deleteItem(env, it); phCapture(env, ctx, "item_deleted", { kind: it.kind, by: "api", via: viaOf(who) }); return json({ deleted: it.id }); }
+      if (m === "DELETE") { await deleteItem(env, it); void phCapture(env, ctx, "item_deleted", { kind: it.kind, by: "api", via: viaOf(who) }); return json({ deleted: it.id }); }
       if (m === "GET") return json({ ...it, ...links(req, it) });
       if (m === "POST" && url.searchParams.get("reanalyze") !== null) { await env.JOBS.send({ type: "scan", id: it.id }); return json({ queued: it.id }); }
       if (m === "POST" && url.searchParams.get("release") !== null) {
@@ -825,7 +825,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     // GET only asks: link previews and crawlers that open a deletion URL must not delete anything
     if (m === "GET") return new Response(deletePage(it.name || it.id, false), { headers: htmlHeaders("no-store") });
     await deleteItem(env, it);
-    phCapture(env, ctx, "item_deleted", { kind: it.kind, by: "deletion_link" });
+    void phCapture(env, ctx, "item_deleted", { kind: it.kind, by: "deletion_link" });
     if (m === "DELETE") return new Response(`deleted ${it.id}\n`, { headers: { "content-type": "text/plain" } });
     return new Response(deletePage(it.name || it.id, true), { headers: htmlHeaders("no-store") });
   }
@@ -874,7 +874,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     return r;
   } catch (e) {
     console.error("unhandled", String(e), (e as Error)?.stack);
-    phException(env, ctx, e, { where: "fetch" });
+    void phException(env, ctx, e, { where: "fetch" });
     return err(500, "internal error");
   }
 }
@@ -895,7 +895,7 @@ export default {
         msg.ack();
       } catch (e) {
         console.error("job failed", msg.body, String(e));
-        phException(env, ctx, e, { where: "queue", job: msg.body.type });
+        void phException(env, ctx, e, { where: "queue", job: msg.body.type });
         msg.retry({ delaySeconds: 30 });
       }
     }

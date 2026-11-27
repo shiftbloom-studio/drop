@@ -27,6 +27,13 @@ export function timingSafeEqual(a: string, b: string) {
 }
 
 /** Prefix of named API tokens (issued from an admin hub and stored hashed in D1). */
+/** `s` without trailing slashes; a linear scan instead of /\/+$/, which backtracks on long runs of slashes. */
+export function trimTrailingSlashes(s: string) {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end--;
+  return end === s.length ? s : s.slice(0, end);
+}
+
 export const TOKEN_PREFIX = "drop_";
 
 /** The token a request carries: `Authorization: Bearer <token>`, `X-API-Key` or `?token=`. */

@@ -264,7 +264,7 @@ export class LocalQueue<T> {
       }
     })();
     this.pending.add(run);
-    run.finally(() => this.pending.delete(run));
+    void run.finally(() => this.pending.delete(run));
   }
   /** Waits for running jobs; drops scheduled retries. */
   async drain() { this.closed = true; for (const t of this.timers) clearTimeout(t); await Promise.allSettled([...this.pending]); }

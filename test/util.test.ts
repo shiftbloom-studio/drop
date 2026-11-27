@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, parseExpiry, randomString, sanitizeName, timingSafeEqual, ID_ALPHABET, ownerFilter, canManage } from "../src/util";
+import { extOf, isAuthed, isNamedToken, requestToken, sha256Hex, tokenUsable, parseExpiry, randomString, sanitizeName, timingSafeEqual, ID_ALPHABET, ownerFilter, canManage, trimTrailingSlashes } from "../src/util";
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -98,5 +98,21 @@ describe("history is private per token", () => {
     expect(canManage(named, "other")).toBe(false);
     expect(canManage(named, null)).toBe(false);
     expect(canManage(master, "other")).toBe(true);
+  });
+});
+
+describe("trimTrailingSlashes", () => {
+  it("strips only trailing slashes", () => {
+    expect(trimTrailingSlashes("/api/items///")).toBe("/api/items");
+    expect(trimTrailingSlashes("/a//b")).toBe("/a//b");
+    expect(trimTrailingSlashes("///")).toBe("");
+    expect(trimTrailingSlashes("")).toBe("");
+    expect(trimTrailingSlashes("https://example.com/")).toBe("https://example.com");
+  });
+  it("stays fast on long runs of slashes", () => {
+    const s = "/".repeat(200_000) + "x";
+    const t = performance.now();
+    expect(trimTrailingSlashes(s)).toBe(s);
+    expect(performance.now() - t).toBeLessThan(50);
   });
 });

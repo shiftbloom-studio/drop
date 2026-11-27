@@ -3,6 +3,8 @@
 // ("invocation_logs": false) and rely on this line instead: no query string, file/text/link ids,
 // deletion codes and claim codes are masked, and only a few harmless headers are kept.
 
+import { trimTrailingSlashes } from "./util";
+
 const KEEP = new Set([
   "/", "/robots.txt", "/sitemap.xml", "/og.png", "/og-card", "/llms.txt", "/health", "/request",
   "/privacy", "/datenschutz", "/imprint", "/impressum", "/terms", "/nutzungsbedingungen", "/content-policy", "/inhaltsrichtlinie",
@@ -11,7 +13,7 @@ const KEEP = new Set([
 
 /** The request path with everything that could open, delete or claim something replaced by a placeholder. */
 export function logPath(pathname: string): string {
-  const p = pathname.replace(/\/+$/, "") || "/";
+  const p = trimTrailingSlashes(pathname) || "/";
   if (KEEP.has(p) || /^\/(assets\/[\w./-]+|favicon[\w.-]*)$/.test(p)) return p;
   if (p.startsWith("/api/items/")) return "/api/items/:id";
   if (p.startsWith("/api/")) return "/api/:other";
